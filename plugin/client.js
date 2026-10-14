@@ -781,12 +781,30 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
     function CanvasPane(props) {
       const { store, state, deck, slide } = props
       const hostRef = React.useRef(null)
+      const wrapRef = React.useRef(null)
       const dragRef = React.useRef(null)
       const slideW = deck.slideWidth
       const slideH = deck.slideHeight
       const zoom = state.zoom
       const width = slideW * zoom
       const height = slideH * zoom
+
+      // 打开新文档时自动适配缩放：画布尺寸可能远大于面板中栏（实测 1835×1024 的文件
+      // 在 ~460px 的中栏里直接溢出贴左 —— 溢出内容上 margin:0 auto 不生效）。
+      // 只在换文档时跑一次；rev 变化和手动缩放都不触发。
+      const fitKey = deck.file
+      React.useEffect(() => {
+        const wrap = wrapRef.current
+        if (wrap === null) return
+        const availW = wrap.clientWidth - 36 // .dsh-ppt-canvaswrap 左右 padding 18px
+        const availH = wrap.clientHeight - 36
+        if (availW <= 0 || availH <= 0 || slideW <= 0 || slideH <= 0) return
+        const fit = Math.round(clamp(Math.min(availW / slideW, availH / slideH), 0.05, 1) * 100) / 100
+        if (Math.abs(store.get().zoom - fit) > 0.005) {
+          store.set({ zoom: fit })
+          savePrefs({ zoom: fit })
+        }
+      }, [fitKey, slideW, slideH, store])
 
       // 精确渲染：LibreOffice 出的整页 PNG。
       // URL 带上 rev，让文档被改过之后浏览器不会拿旧图（Host 侧也按 mtime 缓存）。
@@ -891,7 +909,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         if (store.get().hoverId !== id) store.set({ hoverId: id })
       }, [hitShape, store])
 
-      return h('div', { className: 'dsh-ppt-canvaswrap', onWheel },
+      return h('div', { className: 'dsh-ppt-canvaswrap', ref: wrapRef, onWheel },
         h('div', { className: 'dsh-ppt-canvasstage', style: { width: `${px(width)}px` } },
           h('div', {
             className: 'dsh-ppt-canvas',
@@ -918,7 +936,10 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
                   alt: slide.name,
                   draggable: false,
                   onError: () => setRenderFailed(true),
-                  style: { width: `${px(width)}px`, height: `${px(height)}px` },
+                  // 注意用幻灯片原生尺寸（slideW×slideH），不要乘 zoom —— 本元素在
+                  // zoom 容器内，CSS zoom 会再乘一次，显式乘过就会双重缩放：
+                  // zoom≠1 时 PNG 缩在角落而覆盖层是正常大小，表现即「高亮框不对齐」。
+                  style: { width: `${px(slideW)}px`, height: `${px(slideH)}px` },
                 })
               : null,
             h(SlideView, {

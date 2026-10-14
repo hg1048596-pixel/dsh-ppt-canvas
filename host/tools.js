@@ -101,7 +101,11 @@ export function registerTools(tools, store, bus, logger) {
       PATCH_SCHEMA_NOTE,
     ].join('\n'),
     parameters: {
-      patch: { type: 'json', required: true, description: '修改方案对象：{ summary, ops: [...] }。' },
+      // 参数层也不能用 type:'json'：注册层能过（编译成无 type 的 annotation-only 节点），
+      // 但模型 API 的 function schema 校验会拒绝无 type 节点 —— 实测报错
+      // "Invalid schema for function 'ppt_canvas_apply': schema must be a JSON Schema of
+      // 'type: \"object\"', got 'type: null'"（2026-10-15）。patch 本身是对象，声明为开放 object。
+      patch: { type: 'object', additionalProperties: true, required: true, description: '修改方案对象：{ summary, ops: [...] }。' },
       dryRun: { type: 'boolean', description: '仅校验与试算，不写盘。' },
       requestId: { type: 'string', description: '本次修改对应的画布请求 id（用于版本冲突检测）。' },
     },
