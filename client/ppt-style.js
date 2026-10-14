@@ -102,6 +102,10 @@ const CSS = `
 .dsh-ppt-el.is-overlay.is-hovered{outline:1.5px dashed rgba(26,115,232,.75);outline-offset:-1px;}
 .dsh-ppt-el.is-overlay.is-ai-changed{outline:2px solid #F29900;outline-offset:-1px;background:rgba(242,153,0,.14);}
 
+/* 就地文字编辑器：叠在形状几何位置上，半透明白底盖住底图里的旧文字 */
+.dsh-ppt-textedit{position:absolute;z-index:400;resize:none;border:0;outline:2px solid var(--dsw-alias-brand-primary,#1a73e8);
+  background:rgba(255,255,255,.92);box-shadow:0 4px 18px rgba(0,0,0,.25);cursor:text;overflow:hidden;}
+
 /* ---------------- 元素 ---------------- */
 .dsh-ppt-el{position:absolute;box-sizing:border-box;}
 .dsh-ppt-el.kind-text{padding:2px 1px;}

@@ -355,8 +355,8 @@ function createPptApp(options) {
       hoverId: null,
       zoom: typeof prefs.zoom === 'number' ? prefs.zoom : 1,
       marquee: null,
-      // 双击画布文字形状时置为时间戳，属性面板据此聚焦文本框。
-      focusTextAt: 0,
+      // 正在就地编辑文字的形状 id（null = 没有在编辑）。
+      editingId: null,
       instruction: '',
       sending: false,
       pendingRequestId: null,
@@ -619,6 +619,40 @@ function createPptApp(options) {
     return 'left'
   }
 
+  /**
+   * 就地文字编辑器的定位与近似样式：几何位置精确，字体度量是近似值
+   * （LibreOffice 用的字体 Web 端不一定有），提交后以底图重渲染为准。
+   */
+  function textEditStyle(shape) {
+    const geometry = shape.geometry ?? {}
+    const text = shape.text ?? {}
+    const insets = text.insets ?? { left: 9.6, top: 4.8, right: 9.6, bottom: 4.8 }
+    const style = {
+      position: 'absolute',
+      left: `${px(geometry.x)}px`,
+      top: `${px(geometry.y)}px`,
+      width: `${px(Math.max(0, geometry.w))}px`,
+      height: `${px(Math.max(0, geometry.h))}px`,
+      boxSizing: 'border-box',
+      padding: `${px(insets.top)}px ${px(insets.right)}px ${px(insets.bottom)}px ${px(insets.left)}px`,
+      color: text.color ?? '#111111',
+      fontSize: `${px(text.fontSize ?? 18)}px`,
+      fontWeight: text.bold === true ? 700 : 400,
+      fontStyle: text.italic === true ? 'italic' : 'normal',
+      fontFamily: text.fontFamily ?? 'inherit',
+      textAlign: alignToCss(text.align),
+      lineHeight: 1.2,
+      whiteSpace: 'pre-wrap',
+      wordBreak: 'break-word',
+      overflow: 'hidden',
+    }
+    if (Number.isFinite(geometry.rotation) && geometry.rotation !== 0) {
+      style.transform = `rotate(${px(geometry.rotation)}deg)`
+      style.transformOrigin = 'center center'
+    }
+    return style
+  }
+
   function renderText(shape) {
     const text = shape.text ?? {}
     const paragraphs = Array.isArray(text.paragraphs) ? text.paragraphs : []
@@ -789,6 +823,16 @@ function createPptApp(options) {
     const height = slideH * zoom
     // 拖动移动的手势预览：{ ids: [...], dx, dy }（幻灯片 px）。松手才提交 move op。
     const [ghost, setGhost] = React.useState(null)
+    // 就地编辑：textarea 挂载后立刻聚焦（点出光标就打字）。
+    const editRef = React.useRef(null)
+    React.useEffect(() => {
+      if (state.editingId !== null && state.editingId !== undefined && editRef.current !== null) {
+        editRef.current.focus()
+      }
+    }, [state.editingId])
+    const editingShape = state.editingId === null || state.editingId === undefined
+      ? null
+      : (slide.shapes ?? []).find(item => item.id === state.editingId) ?? null
 
     // 打开新文档时自动适配缩放：画布尺寸可能远大于面板中栏（实测 1835×1024 的文件
     // 在 ~460px 的中栏里直接溢出贴左 —— 溢出内容上 margin:0 auto 不生效）。
@@ -871,7 +915,15 @@ function createPptApp(options) {
         const dx = Math.round(point.x - start.x)
         const dy = Math.round(point.y - start.y)
         setGhost(null)
-        if (!dragging || (dx === 0 && dy === 0)) return
+        if (!dragging) {
+          // 单击（没有拖动）带文字的形状：直接进入就地编辑 —— 点出光标就打字。
+          // 加选（shift/ctrl）或多选状态下不进入，保留框选/多选手势。
+          if (!additive && next.length === 1 && next[0] === shape.id && shape.text !== null && shape.text !== undefined) {
+            store.set({ editingId: shape.id })
+          }
+          return
+        }
+        if (dx === 0 && dy === 0) return
         if (actions === null || actions === undefined || typeof actions.manual !== 'function') return
         actions.manual(dragIds.map(id => ({ op: 'move', id, dx, dy })), '拖动移动')
       }
@@ -938,12 +990,11 @@ function createPptApp(options) {
       if (store.get().hoverId !== id) store.set({ hoverId: id })
     }, [hitShape, store])
 
-    // 双击带文字的形状：选中并让右侧属性面板的文本框获得焦点。
-    // 精确渲染下画布是 PNG，文字本身不可就地编辑（见 HANDOVER 6.5），编辑走属性面板。
+    // 双击带文字的形状：进入就地编辑（单击已会进入，这里是兜底）。
     const onShapeDoubleClick = React.useCallback((event, shape) => {
       if (shape.text === null || shape.text === undefined) return
       event.stopPropagation()
-      store.set({ selectedIds: [shape.id], focusTextAt: Date.now() })
+      store.set({ selectedIds: [shape.id], editingId: shape.id })
     }, [store])
 
     return h('div', { className: 'dsh-ppt-canvaswrap', ref: wrapRef, onWheel },
@@ -994,6 +1045,37 @@ function createPptApp(options) {
             // 底图已在时，DOM 只画高亮框，避免双重绘制。
             overlayOnly: rendered !== null && renderMode === 'fitted' && renderFailed !== true,
           })),
+          // 就地文字编辑器：叠在被编辑形状的几何位置上，样式取自该形状的文本属性。
+          // 打字期间底图 PNG 还是旧内容，提交（失焦）后 apply → rev 变化 → 底图重渲染。
+          editingShape !== null && editingShape.text !== null && editingShape.text !== undefined
+            ? h('textarea', {
+                key: `edit-${editingShape.id}`,
+                ref: editRef,
+                className: 'dsh-ppt-textedit',
+                defaultValue: editingShape.text.plain ?? '',
+                spellCheck: false,
+                onPointerDown: (event) => event.stopPropagation(),
+                onDoubleClick: (event) => event.stopPropagation(),
+                onKeyDown: (event) => {
+                  if (event.key === 'Escape') {
+                    event.preventDefault()
+                    store.set({ editingId: null }) // 取消：不提交
+                  }
+                },
+                onBlur: (event) => {
+                  store.set({ editingId: null })
+                  const value = String(event.target.value)
+                  if (value === (editingShape.text.plain ?? '')) return
+                  if (actions === null || actions === undefined || typeof actions.manual !== 'function') return
+                  actions.manual([{
+                    op: 'setText',
+                    id: editingShape.id,
+                    paragraphs: value.split('\n').map(line => ({ runs: [{ text: line }] })),
+                  }], '编辑文字')
+                },
+                style: textEditStyle(editingShape),
+              })
+            : null,
         ),
         h('div', { className: 'dsh-ppt-canvasmeta' },
           `${deck.slides.indexOf(slide) + 1} / ${deck.slides.length} · ${Math.round(zoom * 100)}%`,
@@ -1165,15 +1247,6 @@ function createPptApp(options) {
   function Inspector(props) {
     const { store, deck, state, onManualEdit } = props
     const selected = state.selectedIds.map(id => findShape(deck, id)).filter(shape => shape !== null)
-    const textRef = React.useRef(null)
-    // 双击画布上的文字形状时（state.focusTextAt 变化），让文本框拿到焦点。
-    const focusTextAt = state.focusTextAt
-    React.useEffect(() => {
-      if (focusTextAt && textRef.current !== null) {
-        textRef.current.focus()
-        textRef.current.select?.()
-      }
-    }, [focusTextAt])
     if (selected.length === 0) {
       return h('div', { className: 'dsh-ppt-inspector' },
         h('div', { className: 'dsh-ppt-inspector-head' }, '属性'),
