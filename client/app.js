@@ -824,10 +824,20 @@ function createPptApp(options) {
     // 拖动移动的手势预览：{ ids: [...], dx, dy }（幻灯片 px）。松手才提交 move op。
     const [ghost, setGhost] = React.useState(null)
     // 就地编辑：textarea 挂载后立刻聚焦（点出光标就打字）。
+    // 注意 preventScroll + 滚动复位：Chromium 对「zoom 容器内的元素聚焦」会按
+    // **未缩放坐标**做 scroll-into-view，直接把 overflow:auto 的画布容器滚出内容区
+    // —— 用户看到的就是「一点组件整个画板就消失」（实测 2026-10-15）。
     const editRef = React.useRef(null)
     React.useEffect(() => {
       if (state.editingId !== null && state.editingId !== undefined && editRef.current !== null) {
-        editRef.current.focus()
+        const wrap = wrapRef.current
+        const top = wrap?.scrollTop ?? 0
+        const left = wrap?.scrollLeft ?? 0
+        editRef.current.focus({ preventScroll: true })
+        if (wrap !== null && wrap !== undefined) {
+          wrap.scrollTop = top
+          wrap.scrollLeft = left
+        }
       }
     }, [state.editingId])
     const editingShape = state.editingId === null || state.editingId === undefined
@@ -1272,7 +1282,6 @@ function createPptApp(options) {
             h('label', null, '文本'),
             h('textarea', {
               className: 'dsh-ppt-input dsh-ppt-textarea',
-              ref: textRef,
               // rev 变化（AI/拖动落盘）后重挂载，让内容跟随最新文档。
               key: `text-${first.id}-${deck.rev}`,
               defaultValue: first.text.plain ?? '',
@@ -1757,6 +1766,49 @@ function createPptApp(options) {
    * （浏览器没有原生窗口拖动，所以用 pointer 事件 + 绝对定位自己实现；
    *   只处理面板内部的拖动，不改窗口位置。）
    */
+  /**
+   * 渲染层兜底：渲染抛错时 React 会把**整棵树**卸载，用户看到的就是
+   * 「整个面板/画板无声消失」。有这个边界，错误会被拦下来摆在台面上。
+   * （真实事故：就地编辑上线后点击组件面板整个消失，仅真实浏览器可复现。）
+   */
+  class PanelErrorBoundary extends React.Component {
+    constructor(props) {
+      super(props)
+      this.state = { error: null }
+    }
+    static getDerivedStateFromError(error) {
+      return { error }
+    }
+    componentDidCatch(error, info) {
+      // 完整堆栈进 console，便于 devtools 排查；UI 上只显示一句话。
+      console.error?.('[dsh-ppt-canvas] render error:', error, info?.componentStack ?? '')
+    }
+    render() {
+      if (this.state.error === null) return this.props.children
+      const message = String(this.state.error?.message ?? this.state.error)
+      return h('div', {
+        style: {
+          position: 'absolute', inset: 0, padding: '18px', zIndex: 60, overflow: 'auto',
+          background: 'var(--dsw-alias-bg-layer-1,#fff)', color: '#d93025', fontSize: 12,
+        },
+      },
+        h('b', null, '画布插件渲染出错（错误边界拦住了，面板没有消失）'),
+        h('div', {
+          style: {
+            marginTop: 8, fontFamily: 'ui-monospace,Consolas,monospace',
+            whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'inherit',
+          },
+        }, message),
+        h('div', { style: { marginTop: 10, color: 'var(--dsw-alias-label-secondary,#888)' } },
+          '把这个报错截给开发者；点「重试」通常能直接恢复。'),
+        h('div', { style: { marginTop: 10 } },
+          h('button', { className: 'dsh-ppt-btn', onClick: () => this.setState({ error: null }) }, '重试'),
+          h('button', { className: 'dsh-ppt-btn', style: { marginLeft: 8 }, onClick: () => win.location.reload() }, '刷新页面'),
+        ),
+      )
+    }
+  }
+
   function FloatingPanel(props) {
     const { store, openPanel, titleBar, geometry } = props
     const state = useStore(store)
@@ -1877,12 +1929,14 @@ function createPptApp(options) {
     }
 
     return h('div', { className: `dsh-ppt-float${box.dragging ? ' is-dragging' : ''}`, style },
-      h(Panel, {
-        store,
-        titleBar: titleBar === undefined
-          ? { draggable: true, onPointerDown: onTitlePointerDown, onClose: () => store.set({ open: false }) }
-          : { ...titleBar, draggable: true, onPointerDown: onTitlePointerDown },
-      }),
+      h(PanelErrorBoundary, null,
+        h(Panel, {
+          store,
+          titleBar: titleBar === undefined
+            ? { draggable: true, onPointerDown: onTitlePointerDown, onClose: () => store.set({ open: false }) }
+            : { ...titleBar, draggable: true, onPointerDown: onTitlePointerDown },
+        }),
+      ),
       h('div', {
         className: 'dsh-ppt-resize is-se',
         title: '拖动改变大小',
@@ -2490,6 +2544,28 @@ function createPptApp(options) {
     // client.js 拿这个 store 实例给 FloatingPanel，
     // 侧边栏按钮也用它开面板，两者状态必须是一份。
     store = created
+
+    // 全局错误可见化：未捕获的异常进面板日志（以前是「无声消失」，用户只看到画板没了）。
+    const pushGlobalError = (text) => {
+      try {
+        created.set(current => ({
+          log: [{ id: `e${Date.now()}${Math.random().toString(36).slice(2, 5)}`, text, kind: 'warn', at: Date.now() }]
+            .concat(current.log).slice(0, 60),
+        }))
+      } catch { /* store 不可用时只留 console */ }
+      console.error?.('[dsh-ppt-canvas]', text)
+    }
+    const onWinError = (event) => {
+      const detail = event?.error?.stack ?? event?.message ?? String(event)
+      pushGlobalError(`页面异常：${String(detail).slice(0, 300)}`)
+    }
+    const onRejection = (event) => {
+      const reason = event?.reason
+      pushGlobalError(`未处理的 Promise 异常：${String(reason?.stack ?? reason).slice(0, 300)}`)
+    }
+    win.addEventListener('error', onWinError)
+    win.addEventListener('unhandledrejection', onRejection)
+
     const openPanel = () => {
       created.set({ open: true })
       savePrefs({ open: true })
@@ -2498,7 +2574,7 @@ function createPptApp(options) {
     if (mountOptions.root !== undefined && mountOptions.root !== null) {
           const root = mountOptions.root
       const ReactDOM = mountOptions.ReactDOM
-      const element = h(Panel, { store: created })
+      const element = h(PanelErrorBoundary, null, h(Panel, { store: created }))
       if (ReactDOM !== undefined && ReactDOM !== null && typeof ReactDOM.createRoot === 'function') {
         const reactRoot = ReactDOM.createRoot(root)
         reactRoot.render(element)
@@ -2508,7 +2584,7 @@ function createPptApp(options) {
       return { store: created, openPanel, dispose: () => { root.innerHTML = '' } }
     }
 
-    return { store: created, openPanel, component: h(Panel, { store: created }), dispose: () => {} }
+    return { store: created, openPanel, component: h(PanelErrorBoundary, null, h(Panel, { store: created })), dispose: () => {} }
   }
 
   return {

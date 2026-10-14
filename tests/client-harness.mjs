@@ -101,7 +101,14 @@ function createFakeReact() {
   const hooks = { states: [], effects: 0, refs: 0 }
   let cursor = 0
   const reset = () => { cursor = 0 }
+  /** 错误边界需要真实 React 的 Component 基类语义（至少能 new 出来并 render）。 */
+  class Component {
+    constructor(props) { this.props = props }
+  }
+  // 与真实 React 一致：用它区分「类组件」与「函数组件」。
+  Component.prototype.isReactComponent = {}
   const React = {
+    Component,
     createElement(type, props, ...children) {
       return {
         $$typeof: 'element',
@@ -112,7 +119,6 @@ function createFakeReact() {
         },
       }
     },
-    Fragment: 'Fragment',
     useState(initial) {
       const index = cursor++
       if (!(index in hooks.states)) hooks.states[index] = typeof initial === 'function' ? initial() : initial
@@ -150,6 +156,19 @@ function createFakeReact() {
   return { React, hooks, reset }
 }
 
+/**
+ * 统一的组件渲染入口：函数组件直接调用，类组件 new 出来调 render()。
+ * 错误边界（PanelErrorBoundary）是类组件，直接 `type(props)` 会抛
+ * "Class constructor cannot be invoked without 'new'"。
+ */
+function renderComponent(type, props) {
+  if (typeof type === 'function' && type.prototype !== undefined && type.prototype.isReactComponent !== undefined) {
+    const instance = new type(props)
+    return instance.render()
+  }
+  return type(props)
+}
+
 function walk(element, visit, depth = 0) {
   if (element === null || element === undefined || depth > 30) return
   if (Array.isArray(element)) {
@@ -176,7 +195,7 @@ function findComponent(element, name, depth = 0) {
   if (typeof element.type === 'function') {
     let rendered = null
     fakeReact.reset()
-    try { rendered = element.type(element.props) } catch { return null }
+    try { rendered = renderComponent(element.type, element.props) } catch { return null }
     return findComponent(rendered, name, depth + 1)
   }
   return findComponent(element.props?.children, name, depth + 1)
@@ -196,7 +215,7 @@ function collectClasses(element, out = [], depth = 0) {
     return out
   }
   if (typeof element.type === 'function') {
-    const rendered = element.type(element.props)
+    const rendered = renderComponent(element.type, element.props)
     collectClasses(rendered, out, depth + 1)
   }
   return out
@@ -211,7 +230,7 @@ function collectElements(element, predicate, out = [], depth = 0) {
   if (typeof element !== 'object' || element.$$typeof !== 'element') return out
   if (predicate(element)) out.push(element)
   if (typeof element.type === 'function') {
-    const rendered = element.type(element.props)
+    const rendered = renderComponent(element.type, element.props)
     collectElements(rendered, predicate, out, depth + 1)
     return out
   }
@@ -349,9 +368,9 @@ step('client: apply 幂等（重复调用不抛，样式不重复注入）', () 
 
 step('client: 侧边栏按钮可渲染（含 wide 态）', () => {
   const entry = registrations.find(item => item.options.name === 'sidebar.footer.action')
-  const compact = entry.component({ wide: false })
+  const compact = renderComponent(entry.component, { wide: false })
   assert(compact !== null && compact.type === 'button', 'compact button renders')
-  const wide = entry.component({ wide: true })
+  const wide = renderComponent(entry.component, { wide: true })
   assert(wide !== null && wide.type === 'button', 'wide button renders')
 })
 
@@ -359,7 +378,7 @@ function renderOverlay() {
   const entry = registrations.find(item => item.options.name === 'shell.overlay')
   assert(entry !== undefined, 'overlay entry registered')
   fakeReact.reset()
-  return entry.component({})
+  return renderComponent(entry.component, {})
 }
 
 /** 渲染 FloatingPanel 的产物。 */
@@ -368,7 +387,7 @@ function renderFloating() {
   const floating = findComponent(tree, 'FloatingPanel')
   assert(floating !== null, 'FloatingPanel found')
   fakeReact.reset()
-  return floating.type(floating.props)
+  return renderComponent(floating.type, floating.props)
 }
 
 /** 确保面板处于打开状态（第一次通过真实点启动器打开），返回打开后的浮窗元素。 */
@@ -391,7 +410,7 @@ function resolveToHost(element, depth = 0) {
   if (typeof element !== 'object' || element.$$typeof !== 'element') return null
   if (typeof element.type === 'function') {
     fakeReact.reset()
-    const rendered = element.type(element.props)
+    const rendered = renderComponent(element.type, element.props)
     return resolveToHost(rendered, depth + 1)
   }
   return element
@@ -515,7 +534,7 @@ step('client: AI 思考/回复面板能渲染（多种状态都不抛错）', ()
   assert(pane !== null, 'the AI pane component is part of the panel tree')
 
   const render = (ai, aiCollapsed = false) => {
-    const tree = pane.type({
+    const tree = renderComponent(pane.type, {
       store: exposedStore,
       state: { ...exposedStore.get(), ai, aiCollapsed },
     })
@@ -526,7 +545,7 @@ step('client: AI 思考/回复面板能渲染（多种状态都不抛错）', ()
       if (typeof node === 'string' || typeof node === 'number') { texts.push(String(node)); return }
       if (Array.isArray(node)) { for (const child of node) walk(child, depth + 1); return }
       if (typeof node !== 'object') return
-      if (typeof node.type === 'function') { walk(node.type(node.props), depth + 1); return }
+      if (typeof node.type === 'function') { walk(renderComponent(node.type, node.props), depth + 1); return }
       walk(node.props?.children, depth + 1)
     }
     walk(tree)
