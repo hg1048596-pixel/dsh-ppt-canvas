@@ -1,0 +1,63 @@
+{
+  "name": "协同编辑演示",
+  "slideWidthIn": 13.333,
+  "slideHeightIn": 7.5,
+  "slides": [
+    {
+      "background": "F7F8FA",
+      "shapes": [
+        { "type": "rect", "x": 0, "y": 0, "w": 13.333, "h": 1.35, "fill": "1F4E5F", "line": null },
+        { "type": "text", "x": 0.6, "y": 0.28, "w": 9.0, "h": 0.8,
+          "text": "2026 年第三季度复盘", "size": 30, "bold": true, "color": "FFFFFF",
+          "align": "left", "anchor": "middle", "font": "Microsoft YaHei" },
+        { "type": "text", "x": 0.6, "y": 1.75, "w": 6.2, "h": 2.6,
+          "text": "本季度三条主线：\n1. 协同编辑能力上线，覆盖 PPT 场景；\n2. 选择上下文精度提升，token 消耗下降 38%；\n3. 撤销重做与冲突检测进入灰度。",
+          "size": 16, "color": "333333", "lineSpacing": 1.25, "font": "Microsoft YaHei" },
+        { "type": "rect", "x": 7.4, "y": 1.75, "w": 5.3, "h": 2.6, "fill": "FFF2CC", "line": "D6B656", "lineWidth": 1.25 },
+        { "type": "text", "x": 7.6, "y": 1.95, "w": 4.9, "h": 2.2,
+          "text": "关键结论\n· AI 编辑落在选区范围内\n· 人工修改后 AI 基于最新版本继续",
+          "size": 14, "color": "7F6000", "font": "Microsoft YaHei" },
+        { "type": "text", "x": 0.6, "y": 4.75, "w": 12.1, "h": 0.5,
+          "text": "数据来源：内部埋点（2026-09-30）", "size": 12, "color": "888888",
+          "italic": true, "align": "right", "font": "Microsoft YaHei" },
+        { "type": "line", "x": 0.6, "y": 4.6, "w": 12.1, "h": 0, "color": "CCCCCC", "lineWidth": 1 }
+      ]
+    },
+    {
+      "background": "FFFFFF",
+      "shapes": [
+        { "type": "text", "x": 0.6, "y": 0.4, "w": 8.0, "h": 0.7,
+          "text": "核心指标", "size": 26, "bold": true, "color": "1F4E5F", "font": "Microsoft YaHei" },
+        { "type": "table", "x": 0.8, "y": 1.5, "w": 7.2, "h": 2.6,
+          "rows": [["指标", "Q2", "Q3", "变化"],
+                   ["日活编辑用户", "12,400", "19,800", "+59.7%"],
+                   ["选区指令占比", "31%", "68%", "+37pp"],
+                   ["平均响应时延", "4.2s", "2.6s", "-38%"]] },
+        { "type": "rect", "x": 8.4, "y": 1.5, "w": 4.2, "h": 2.6, "fill": "E8F0FE", "line": "1A73E8", "lineWidth": 1 },
+        { "type": "text", "x": 8.6, "y": 1.7, "w": 3.8, "h": 2.2,
+          "text": "下一步\n1. 框选 + 批量改写\n2. 风格统一\n3. 母版级还原度验证",
+          "size": 15, "color": "174EA6", "font": "Microsoft YaHei" },
+        { "type": "image", "x": 0.8, "y": 4.4, "w": 3.6, "h": 2.4, "image": "chart.png" },
+        { "type": "text", "x": 4.7, "y": 4.4, "w": 7.9, "h": 2.4,
+          "text": "图注：柱状图为「选区指令占比」的趋势，右侧为容量冗余评估。\n以上指标每周一自动刷新，异常波动会触发告警。",
+          "size": 14, "color": "444444", "font": "Microsoft YaHei" }
+      ]
+    },
+    {
+      "background": "FFFFFF",
+      "shapes": [
+        { "type": "rect", "x": 0, "y": 6.6, "w": 13.333, "h": 0.9, "fill": "1F4E5F", "line": null },
+        { "type": "text", "x": 0.6, "y": 6.75, "w": 12.1, "h": 0.6,
+          "text": "Q&A · 感谢聆听", "size": 20, "bold": true, "color": "FFFFFF",
+          "align": "center", "anchor": "middle", "font": "Microsoft YaHei" },
+        { "type": "ellipse", "x": 5.2, "y": 2.1, "w": 2.9, "h": 2.9, "fill": "FDE7E9", "line": "D93025", "lineWidth": 1.5 },
+        { "type": "text", "x": 5.45, "y": 3.05, "w": 2.4, "h": 1.0,
+          "text": "3 个\n待办事项", "size": 18, "bold": true, "color": "B31412",
+          "align": "center", "anchor": "middle", "font": "Microsoft YaHei" },
+        { "type": "text", "x": 0.8, "y": 1.1, "w": 11.7, "h": 0.8,
+          "text": "结论与待办", "size": 28, "bold": true, "color": "1F4E5F",
+          "align": "center", "font": "Microsoft YaHei" }
+      ]
+    }
+  ]
+}

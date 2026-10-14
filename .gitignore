@@ -1,0 +1,12 @@
+# 诊断产物（含用户文件副本，勿入库）
+debug/
+# 独立窗口时期的 Electron 探针（功能已移除）
+.windowtest/
+# 从 app.asar 抽出的宿主源码/探针产物（只读参考，体积大）
+tools/.probe/
+tools/_scdir/
+# 依赖
+node_modules/
+# 系统杂物
+Thumbs.db
+Desktop.ini
