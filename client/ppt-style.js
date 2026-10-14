@@ -96,7 +96,7 @@ const CSS = `
 .dsh-ppt-rendered{position:absolute;left:0;top:0;display:block;user-select:none;pointer-events:none;
   image-rendering:auto;z-index:0;}
 .dsh-ppt-slide.is-overlay{background:transparent;}
-.dsh-ppt-el.is-overlay{background:transparent;}
+.dsh-ppt-el.is-overlay{background:transparent;cursor:move;}
 .dsh-ppt-el.is-overlay.is-selected{outline:2px solid var(--dsw-alias-brand-primary,#1a73e8);outline-offset:-1px;
   background:rgba(26,115,232,.12);}
 .dsh-ppt-el.is-overlay.is-hovered{outline:1.5px dashed rgba(26,115,232,.75);outline-offset:-1px;}

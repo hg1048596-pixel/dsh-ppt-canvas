@@ -355,6 +355,8 @@ function createPptApp(options) {
       hoverId: null,
       zoom: typeof prefs.zoom === 'number' ? prefs.zoom : 1,
       marquee: null,
+      // 双击画布文字形状时置为时间戳，属性面板据此聚焦文本框。
+      focusTextAt: 0,
       instruction: '',
       sending: false,
       pendingRequestId: null,
@@ -387,12 +389,16 @@ function createPptApp(options) {
    * 所以这里只保留几何，供命中测试与高亮使用。
    */
   function renderShapeOverlay(shape, shapeOptions) {
-    const { selected, hovered, highlighted, onPointerDown, interactive } = shapeOptions
+    const { selected, hovered, highlighted, onPointerDown, onDoubleClick, interactive, ghost } = shapeOptions
     const geometry = shape.geometry
+    // 拖动预览：ghost 命中时给这个形状加位移（底图 PNG 松手后才更新）。
+    const ghosted = ghost !== null && ghost !== undefined && ghost.ids.indexOf(shape.id) !== -1
+    const offsetX = ghosted ? ghost.dx : 0
+    const offsetY = ghosted ? ghost.dy : 0
     const style = {
       position: 'absolute',
-      left: `${px(geometry.x)}px`,
-      top: `${px(geometry.y)}px`,
+      left: `${px(geometry.x + offsetX)}px`,
+      top: `${px(geometry.y + offsetY)}px`,
       width: `${px(Math.max(0, geometry.w))}px`,
       height: `${px(Math.max(0, geometry.h))}px`,
       zIndex: String(shape.z + 1),
@@ -415,6 +421,9 @@ function createPptApp(options) {
     }
     if (interactive && onPointerDown !== null && onPointerDown !== undefined) {
       props.onPointerDown = (event) => onPointerDown(event, shape)
+    }
+    if (interactive && onDoubleClick !== null && onDoubleClick !== undefined) {
+      props.onDoubleClick = (event) => onDoubleClick(event, shape)
     }
     return h('div', props)
   }
@@ -725,7 +734,7 @@ function createPptApp(options) {
 
   /** 整页：背景 + 所有元素 + 选中高亮。 */
   function SlideView(props) {
-    const { slide, width, height, selection, hoverId, highlights, onPointerDown, interactive, marquee, overlayOnly } = props
+    const { slide, width, height, selection, hoverId, highlights, onPointerDown, onDoubleClick, interactive, marquee, overlayOnly, ghost } = props
     if (slide === null || slide === undefined) return null
     const background = /^#[0-9a-fA-F]{6}$/.test(slide.background ?? '') ? slide.background : '#FFFFFF'
     return h('div', {
@@ -742,7 +751,9 @@ function createPptApp(options) {
         hovered: hoverId === shape.id,
         highlighted: highlights[shape.id] === true,
         onPointerDown,
+        onDoubleClick,
         interactive,
+        ghost,
       })),
       marquee === null || marquee === undefined ? null : h('div', {
         className: 'dsh-ppt-marquee',
@@ -767,7 +778,7 @@ function createPptApp(options) {
   // ------------------------------------------------------------------ 画布交互
 
   function CanvasPane(props) {
-    const { store, state, deck, slide } = props
+    const { store, state, deck, slide, actions } = props
     const hostRef = React.useRef(null)
     const wrapRef = React.useRef(null)
     const dragRef = React.useRef(null)
@@ -776,6 +787,8 @@ function createPptApp(options) {
     const zoom = state.zoom
     const width = slideW * zoom
     const height = slideH * zoom
+    // 拖动移动的手势预览：{ ids: [...], dx, dy }（幻灯片 px）。松手才提交 move op。
+    const [ghost, setGhost] = React.useState(null)
 
     // 打开新文档时自动适配缩放：画布尺寸可能远大于面板中栏（实测 1835×1024 的文件
     // 在 ~460px 的中栏里直接溢出贴左 —— 溢出内容上 margin:0 auto 不生效）。
@@ -836,7 +849,35 @@ function createPptApp(options) {
         next = [shape.id]
       }
       store.set({ selectedIds: next, error: null })
-    }, [store])
+
+      // 拖动移动：手势期间只动 ghost 预览框，松手把位移作为 move op 一次提交
+      // （走 apply → 撤销历史 → 底图按新 rev 重渲染）。多选时整组一起动。
+      const dragIds = next.indexOf(shape.id) !== -1 ? next.slice() : [shape.id]
+      const start = localPoint(event)
+      const threshold = 3 / zoom // 3 屏幕像素换算成幻灯片坐标
+      let dragging = false
+      const onMove = (moveEvent) => {
+        const point = localPoint(moveEvent)
+        const dx = point.x - start.x
+        const dy = point.y - start.y
+        if (!dragging && Math.abs(dx) < threshold && Math.abs(dy) < threshold) return
+        dragging = true
+        setGhost({ ids: dragIds, dx: Math.round(dx), dy: Math.round(dy) })
+      }
+      const onUp = (upEvent) => {
+        win.removeEventListener('pointermove', onMove)
+        win.removeEventListener('pointerup', onUp)
+        const point = localPoint(upEvent)
+        const dx = Math.round(point.x - start.x)
+        const dy = Math.round(point.y - start.y)
+        setGhost(null)
+        if (!dragging || (dx === 0 && dy === 0)) return
+        if (actions === null || actions === undefined || typeof actions.manual !== 'function') return
+        actions.manual(dragIds.map(id => ({ op: 'move', id, dx, dy })), '拖动移动')
+      }
+      win.addEventListener('pointermove', onMove)
+      win.addEventListener('pointerup', onUp)
+    }, [store, localPoint, zoom, actions])
 
     const onCanvasPointerDown = React.useCallback((event) => {
       if (event.button !== 0) return
@@ -897,6 +938,14 @@ function createPptApp(options) {
       if (store.get().hoverId !== id) store.set({ hoverId: id })
     }, [hitShape, store])
 
+    // 双击带文字的形状：选中并让右侧属性面板的文本框获得焦点。
+    // 精确渲染下画布是 PNG，文字本身不可就地编辑（见 HANDOVER 6.5），编辑走属性面板。
+    const onShapeDoubleClick = React.useCallback((event, shape) => {
+      if (shape.text === null || shape.text === undefined) return
+      event.stopPropagation()
+      store.set({ selectedIds: [shape.id], focusTextAt: Date.now() })
+    }, [store])
+
     return h('div', { className: 'dsh-ppt-canvaswrap', ref: wrapRef, onWheel },
       h('div', { className: 'dsh-ppt-canvasstage', style: { width: `${px(width)}px` } },
         h('div', {
@@ -938,6 +987,8 @@ function createPptApp(options) {
             hoverId: state.hoverId,
             highlights: state.highlights,
             onPointerDown: onShapePointerDown,
+            onDoubleClick: onShapeDoubleClick,
+            ghost,
             interactive: true,
             marquee: state.marquee,
             // 底图已在时，DOM 只画高亮框，避免双重绘制。
@@ -1114,6 +1165,15 @@ function createPptApp(options) {
   function Inspector(props) {
     const { store, deck, state, onManualEdit } = props
     const selected = state.selectedIds.map(id => findShape(deck, id)).filter(shape => shape !== null)
+    const textRef = React.useRef(null)
+    // 双击画布上的文字形状时（state.focusTextAt 变化），让文本框拿到焦点。
+    const focusTextAt = state.focusTextAt
+    React.useEffect(() => {
+      if (focusTextAt && textRef.current !== null) {
+        textRef.current.focus()
+        textRef.current.select?.()
+      }
+    }, [focusTextAt])
     if (selected.length === 0) {
       return h('div', { className: 'dsh-ppt-inspector' },
         h('div', { className: 'dsh-ppt-inspector-head' }, '属性'),
@@ -1139,6 +1199,9 @@ function createPptApp(options) {
             h('label', null, '文本'),
             h('textarea', {
               className: 'dsh-ppt-input dsh-ppt-textarea',
+              ref: textRef,
+              // rev 变化（AI/拖动落盘）后重挂载，让内容跟随最新文档。
+              key: `text-${first.id}-${deck.rev}`,
               defaultValue: first.text.plain ?? '',
               rows: 3,
               onBlur: (event) => update([{
@@ -2286,7 +2349,7 @@ function createPptApp(options) {
                   }, '打开本地 .pptx'),
                 ),
               )
-            : h(CanvasPane, { store, state, deck, slide }),
+            : h(CanvasPane, { store, state, deck, slide, actions }),
           state.loading
             ? h('div', { className: 'dsh-ppt-loading' }, h('span', { className: 'dsh-ppt-spinner' }), state.loadingLabel)
             : null,
