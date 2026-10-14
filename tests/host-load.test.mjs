@@ -144,6 +144,14 @@ await step('apply(ctx): 装配 HTTP 路由 + 4 个模型工具（webServer/tools
     assertEqual(typeof definition.output?.render, 'function', `${definition.name} needs output.render`)
     assertEqual(typeof definition.execute, 'function', `${definition.name} needs execute`)
     assert(definition.output.schema !== undefined, `${definition.name} needs an output schema`)
+    // 宿主 assertSupportedJsonSchema 的类型白名单（2026-10-14 实测）：根节点 type 用白名单外的
+    // 值（如 'json'）会让 tools.register 直接抛错、工具全部注册失败。
+    const HOST_SCHEMA_TYPES = ['object', 'array', 'string', 'number', 'integer', 'boolean', 'null']
+    const rootType = definition.output.schema.type
+    assert(
+      rootType === undefined || HOST_SCHEMA_TYPES.includes(rootType),
+      `${definition.name} output.schema.type is ${JSON.stringify(rootType)} — the host whitelist is ${HOST_SCHEMA_TYPES.join('/')} (a 'json' root once failed all 4 registrations)`,
+    )
   }
 })
 

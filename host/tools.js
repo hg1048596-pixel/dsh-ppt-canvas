@@ -47,7 +47,9 @@ export function registerTools(tools, store, bus, logger) {
       path: { type: 'string', description: '要打开的 .pptx 绝对路径；留空则打开内置演示文稿。' },
     },
     output: {
-      schema: { type: 'json' },
+      // 宿主 assertSupportedJsonSchema 的类型白名单不含 'json'（实测 2026-10-14：4 工具全因
+      // {type:'json'} 注册失败）。根节点必须用白名单内的类型；'object' + 开放属性是最小可行写法。
+      schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
     async execute(args) {
@@ -77,7 +79,9 @@ export function registerTools(tools, store, bus, logger) {
       requestId: { type: 'string', required: true, description: '画布请求 id，形如 req_xxx。' },
     },
     output: {
-      schema: { type: 'json' },
+      // 宿主 assertSupportedJsonSchema 的类型白名单不含 'json'（实测 2026-10-14：4 工具全因
+      // {type:'json'} 注册失败）。根节点必须用白名单内的类型；'object' + 开放属性是最小可行写法。
+      schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
     execute(args) {
@@ -102,7 +106,9 @@ export function registerTools(tools, store, bus, logger) {
       requestId: { type: 'string', description: '本次修改对应的画布请求 id（用于版本冲突检测）。' },
     },
     output: {
-      schema: { type: 'json' },
+      // 宿主 assertSupportedJsonSchema 的类型白名单不含 'json'（实测 2026-10-14：4 工具全因
+      // {type:'json'} 注册失败）。根节点必须用白名单内的类型；'object' + 开放属性是最小可行写法。
+      schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
     async execute(args) {
@@ -132,7 +138,9 @@ export function registerTools(tools, store, bus, logger) {
       steps: { type: 'number', description: '撤销/重做的步数，默认 1。' },
     },
     output: {
-      schema: { type: 'json' },
+      // 宿主 assertSupportedJsonSchema 的类型白名单不含 'json'（实测 2026-10-14：4 工具全因
+      // {type:'json'} 注册失败）。根节点必须用白名单内的类型；'object' + 开放属性是最小可行写法。
+      schema: { type: 'object', additionalProperties: true },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
     },
     async execute(args) {
