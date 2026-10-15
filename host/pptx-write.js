@@ -534,7 +534,6 @@ function setTextBody(element, paragraphs) {
   paragraphs.forEach((paragraph, index) => {
     const source = existing.length > 0 ? existing[Math.min(index, existing.length - 1)] : undefined
     const templatePPr = source === undefined ? undefined : childOf(source, 'a:pPr')
-    const templateRPr = resolveTemplateRPr(index)
     const p = createElement('a:p')
     const align = paragraph.align
     if (templatePPr !== undefined || align !== undefined) {
@@ -545,6 +544,27 @@ function setTextBody(element, paragraphs) {
     }
 
     const newRuns = paragraph.runs ?? []
+    const newText = newRuns.map(run => run.text ?? '').join('')
+
+    if (newText === '') {
+      // 空行**绝不带 run**（2026-10-15 用户实测"改完字内容整体下降一行"）：
+      // 哪怕是空文本 run，也会按它继承到的字号把空行撑高一行，下面的内容
+      // 全被推下去。OOXML 里空行就是不带 run 的 <a:p/>。
+      // 例外：这一行**原本**有带格式的文字（被用户清空）——用 endParaRPr
+      // 克隆原格式保住行高，这正是 PowerPoint 存"清空的行"的方式。
+      const prevStyled = styledRPrOf(source)
+      if (prevStyled !== undefined) {
+        const endPara = cloneElement(prevStyled)
+        endPara.name = 'a:endParaRPr'
+        appendChild(p, endPara)
+      }
+      appendChild(txBody, p)
+      if (index === paragraphs.length - 1 && templateEnd !== undefined) {
+        appendChild(txBody, cloneElement(templateEnd))
+      }
+      return
+    }
+
     const hasExplicitRunStyle = newRuns.some(run =>
       run.color !== undefined || run.fontSize !== undefined || run.bold !== undefined
       || run.italic !== undefined || run.fontFamily !== undefined)
@@ -586,8 +606,7 @@ function setTextBody(element, paragraphs) {
       const totalOld = oldRunMeta.reduce((sum, meta) => sum + meta.len, 0)
       const oldRunIndexByChar = []
       oldRunMeta.forEach((meta, runIndex) => { for (let i = 0; i < meta.len; i++) oldRunIndexByChar.push(runIndex) })
-      const newText = newRuns.map(run => run.text ?? '').join('')
-      if (newText !== '' && totalOld > 0) {
+      if (totalOld > 0) {
         let buffer = ''
         let bufferRun = 0
         let oldPos = 0
@@ -606,10 +625,11 @@ function setTextBody(element, paragraphs) {
         }
         flush()
       } else {
-        // 新段为空文本：只保留段落骨架（pPr 已加），不带 run
+        // 旧段只有空 run：退回模板链
+        for (const run of newRuns) emitRun(resolveTemplateRPr(index), run.text ?? '', run)
       }
     } else {
-      for (const run of newRuns) emitRun(templateRPr, run.text ?? '', run)
+      for (const run of newRuns) emitRun(resolveTemplateRPr(index), run.text ?? '', run)
     }
 
     appendChild(txBody, p)

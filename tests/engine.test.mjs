@@ -368,6 +368,13 @@ check('patch: setText 逐段沿用旧段落样式（空首行不再把整框拉�
   const added = title2.text.paragraphs[2].runs[0]
   assert(Math.abs(added.fontSize - ptPx) < 0.01, `新增段沿用最后一个旧段落的样式（got ${added.fontSize}）`)
   assertEqual(added.color, '#FFC000', '新增段颜色沿用')
+  // 空行不得带 run：run 会按继承到的字号把空行撑高一行，内容整体下移
+  const afterRoot = parseXml(Buffer.from(readZipEntries(result.buffer).find(entry => entry.name === 'ppt/slides/slide1.xml').data).toString('utf8'))
+  const sp2 = findAll(afterRoot, 'p:sp').find(sp => findAll(sp, 'a:t').some(t => textOf(t) === '改一个字'))
+  assert(sp2 !== undefined, 'edited shape present in output XML')
+  const firstParagraph = childOf(findFirst(sp2, 'p:txBody'), 'a:p')
+  assert(firstParagraph !== undefined, 'first paragraph exists')
+  assert(findFirst(firstParagraph, 'a:r') === undefined, '空行的段落不得带 run（会把内容整体推下一行）')
 })
 
 check('patch: setText 逐字符沿用段内混排格式（原生 PPT 语义）', () => {
