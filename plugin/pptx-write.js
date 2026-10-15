@@ -543,25 +543,75 @@ function setTextBody(element, paragraphs) {
       if (align !== undefined) setAttr(pPr, 'algn', align === 'center' ? 'ctr' : align === 'right' ? 'r' : align === 'justify' ? 'just' : 'l')
       appendChild(p, pPr)
     }
-    for (const run of (paragraph.runs ?? [])) {
+
+    const newRuns = paragraph.runs ?? []
+    const hasExplicitRunStyle = newRuns.some(run =>
+      run.color !== undefined || run.fontSize !== undefined || run.bold !== undefined
+      || run.italic !== undefined || run.fontFamily !== undefined)
+    const oldRuns = source === undefined ? [] : childrenOf(source).filter(child => child.name === 'a:r' || child.name === 'a:fld')
+
+    /**
+     * 逐字符样式映射（原生 PPT 语义：改字保留每个字符自己的格式）。
+     * 新段落没有显式样式、旧段落有多个 run 时，把旧段落的每个字符位置
+     * 映射到它所在 run 的 rPr；新文本第 i 个字符继承旧文本第
+     * min(i, 旧长度-1) 个字符的格式，连续同格式的字符合并成一个 run。
+     * （插入/删除造成的偏移是近似映射；此前任何一次编辑都会把整段拉平
+     * 成首 run 样式，相比之下这是保真度的量级提升。）
+     */
+    const emitRun = (rPrTemplate, text, run) => {
       const r = createElement('a:r')
-      const rPr = templateRPr === undefined ? createElement('a:rPr', { lang: 'zh-CN', dirty: '0' }) : cloneElement(templateRPr)
+      const rPr = rPrTemplate === undefined ? createElement('a:rPr', { lang: 'zh-CN', dirty: '0' }) : cloneElement(rPrTemplate)
       if (run.bold !== undefined) setAttr(rPr, 'b', run.bold ? '1' : '0')
       if (run.italic !== undefined) setAttr(rPr, 'i', run.italic ? '1' : '0')
       appendChild(r, rPr)
       const attrs = { }
       // 首尾空格必须保留，否则 PowerPoint 会吞掉（也影响后续测量的准确性）。
-      if (typeof run.text === 'string' && (/^\s/.test(run.text) || /\s$/.test(run.text))) {
+      if (typeof text === 'string' && (/^\s/.test(text) || /\s$/.test(text))) {
         attrs['xml:space'] = 'preserve'
       }
       const t = createElement('a:t', attrs)
-      setText(t, run.text ?? '')
+      setText(t, text ?? '')
       appendChild(r, t)
       if (run.color !== undefined && run.color !== null) applyRunStyle(rPr, { color: run.color })
       if (run.fontSize !== undefined && run.fontSize !== null) applyRunStyle(rPr, { fontSize: run.fontSize })
       if (run.fontFamily !== undefined && run.fontFamily !== null) applyRunStyle(rPr, { fontFamily: run.fontFamily })
       appendChild(p, r)
     }
+
+    if (!hasExplicitRunStyle && oldRuns.length > 0) {
+      const oldRunMeta = oldRuns.map((r) => {
+        const t = childOf(r, 'a:t')
+        return { rPr: childOf(r, 'a:rPr'), len: t === undefined ? 0 : textOf(t).length }
+      })
+      const totalOld = oldRunMeta.reduce((sum, meta) => sum + meta.len, 0)
+      const oldRunIndexByChar = []
+      oldRunMeta.forEach((meta, runIndex) => { for (let i = 0; i < meta.len; i++) oldRunIndexByChar.push(runIndex) })
+      const newText = newRuns.map(run => run.text ?? '').join('')
+      if (newText !== '' && totalOld > 0) {
+        let buffer = ''
+        let bufferRun = 0
+        let oldPos = 0
+        const flush = () => {
+          if (buffer === '') return
+          emitRun(oldRunMeta[bufferRun].rPr, buffer, {})
+          buffer = ''
+        }
+        for (const ch of newText) {
+          const clamped = Math.min(oldPos, totalOld - 1)
+          const runIndex = oldRunIndexByChar[clamped] ?? 0
+          if (oldPos > 0 && runIndex !== bufferRun) flush()
+          bufferRun = runIndex
+          buffer += ch
+          oldPos += 1
+        }
+        flush()
+      } else {
+        // 新段为空文本：只保留段落骨架（pPr 已加），不带 run
+      }
+    } else {
+      for (const run of newRuns) emitRun(templateRPr, run.text ?? '', run)
+    }
+
     appendChild(txBody, p)
     if (index === paragraphs.length - 1 && templateEnd !== undefined) {
       appendChild(txBody, cloneElement(templateEnd))

@@ -370,6 +370,59 @@ check('patch: setText 逐段沿用旧段落样式（空首行不再把整框拉�
   assertEqual(added.color, '#FFC000', '新增段颜色沿用')
 })
 
+check('patch: setText 逐字符沿用段内混排格式（原生 PPT 语义）', () => {
+  // 段内混排：["AAAA"(44pt 红粗), "BB"(20pt 黑)] → 就地改成 "XXXXXX"：
+  // 前 4 个字符沿用红粗 44，后 2 个沿用黑 20 —— 不再被首 run 拉平。
+  const before = readFileSync(deckPath)
+  const zipEntries = readZipEntries(before)
+  const slide1Xml = Buffer.from(zipEntries.find(entry => entry.name === 'ppt/slides/slide1.xml').data).toString('utf8')
+  const root = parseXml(slide1Xml)
+  const sps = findAll(root, 'p:sp')
+  const titleSp = sps.find(sp => findAll(sp, 'a:t').some(t => textOf(t).trim() !== ''))
+  const txBody = findFirst(titleSp, 'p:txBody')
+  for (const p of childrenOf(txBody, 'a:p')) removeChild(txBody, p)
+  removeChildren(txBody, 'a:endParaRPr')
+  const mkRun = (text, sz, color) => {
+    const r = createElement('a:r')
+    const rPr = createElement('a:rPr', { lang: 'zh-CN', sz, b: '1' })
+    const fill = createElement('a:solidFill')
+    appendChild(fill, createElement('a:srgbClr', { val: color }))
+    appendChild(rPr, fill)
+    appendChild(r, rPr)
+    const t = createElement('a:t')
+    setText(t, text)
+    appendChild(r, t)
+    return r
+  }
+  const p1 = createElement('a:p')
+  appendChild(p1, mkRun('AAAA', '4400', 'FF0000'))
+  appendChild(p1, mkRun('BB', '2000', '000000'))
+  appendChild(txBody, p1)
+  const injected = writeZip(zipEntries.map(entry => ({
+    name: entry.name,
+    data: entry.name === 'ppt/slides/slide1.xml' ? Buffer.from(serializeXml(root)) : entry.data,
+  })))
+
+  const deck1 = readDeck(injected, deckPath, 0)
+  const title1 = deck1.slides[0].shapes.find(shape => shape.text !== null && shape.text.plain === 'AAAABB')
+  assert(title1 !== undefined, 'injected mixed-run shape readable')
+  const patch = {
+    summary: '就地编辑',
+    ops: [{ op: 'setText', id: title1.id, paragraphs: [{ runs: [{ text: 'XXXXXX' }] }] }],
+  }
+  const result = applyPatch(injected, deck1, deckPath, patch, {})
+  const after = readDeck(result.buffer, deckPath, 1)
+  const title2 = after.slides[0].shapes.find(shape => shape.id === title1.id)
+  const runs = title2.text.paragraphs[0].runs
+  assertEqual(runs.length, 2, `同格式字符合并：6 字符应得到 2 个 run（got ${runs.length}）`)
+  assertEqual(runs[0].text, 'XXXX', '前 4 字符 = 新文本的前 4 个字符')
+  assert(Math.abs(runs[0].fontSize - 44 * 96 / 72) < 0.01, `前 4 字符字号沿用（got ${runs[0].fontSize}）`)
+  assertEqual(runs[0].color, '#FF0000', '前 4 字符颜色沿用')
+  assertEqual(runs[1].text, 'XX', '后 2 字符 = 新文本的后 2 个字符')
+  assert(Math.abs(runs[1].fontSize - 20 * 96 / 72) < 0.01, `后 2 字符字号沿用（got ${runs[1].fontSize}）`)
+  assertEqual(runs[1].color, '#000000', '后 2 字符颜色沿用')
+})
+
 check('patch: 复制出来的元素拿到新的 cNvPr id', () => {
   const deck = readDeck(readFileSync(deckPath), deckPath, 1)
   const ids = deck.slides[0].shapes.map(shape => shape.shapeId)

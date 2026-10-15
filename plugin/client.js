@@ -389,6 +389,9 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         dropHint: null,
         history: { rev: 0, canUndo: false, canRedo: false },
         maximized: false,
+        // DOM 桥接：提交后立即用 DOM 渲染显示新内容，新 PNG 加载完（onLoad）自动
+        // 切回精确渲染 —— 消灭"提交后 1.3 秒看到旧图"的割裂感。
+        domBridgeRev: null,
             }
     }
 
@@ -680,6 +683,19 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       const insets = text.insets ?? { left: 9.6, top: 4.8, right: 9.6, bottom: 4.8 }
       const dominant = dominantRunStyle(shape)
       const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1
+      const fontSizeSlide = text.fontSize ?? dominant.fontSize ?? 18
+      const linesCount = String(text.plain ?? '').split('\n').length
+      const lineHeight = fontSizeSlide * 1.2
+      // 垂直锚点补偿：middle/bottom 锚点的框，文字实际渲染在中/下部，
+      // 编辑器若从顶部排会和底图错位 —— 按行数×行高把首行推到对应位置。
+      const innerH = Math.max(0, geometry.h - insets.top - insets.bottom)
+      const textBlock = linesCount * lineHeight
+      let anchorPad = 0
+      if (text.anchor === 'middle') anchorPad = Math.max(0, (innerH - textBlock) / 2)
+      else if (text.anchor === 'bottom') anchorPad = Math.max(0, innerH - textBlock)
+      // 编辑器底色：形状有纯色填充就用它（与底图连续）；否则半透明白盖住旧文字
+      const fill = shape.style?.fill?.color
+      const background = typeof fill === 'string' && /^#[0-9a-fA-F]{6}$/.test(fill) ? fill : 'rgba(255,255,255,0.92)'
       const style = {
         position: 'absolute',
         left: `${px(geometry.x * z)}px`,
@@ -687,9 +703,9 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         width: `${px(Math.max(0, geometry.w) * z)}px`,
         height: `${px(Math.max(0, geometry.h) * z)}px`,
         boxSizing: 'border-box',
-        padding: `${px(insets.top * z)}px ${px(insets.right * z)}px ${px(insets.bottom * z)}px ${px(insets.left * z)}px`,
+        padding: `${px((insets.top + anchorPad) * z)}px ${px(insets.right * z)}px ${px(insets.bottom * z)}px ${px(insets.left * z)}px`,
         color: text.color ?? dominant.color ?? '#111111',
-        fontSize: `${px((text.fontSize ?? dominant.fontSize ?? 18) * z)}px`,
+        fontSize: `${px(fontSizeSlide * z)}px`,
         fontWeight: text.bold === true ? 700 : 400,
         fontStyle: text.italic === true ? 'italic' : 'normal',
         fontFamily: text.fontFamily ?? 'inherit',
@@ -698,6 +714,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
         overflow: 'hidden',
+        background,
       }
       if (Number.isFinite(geometry.rotation) && geometry.rotation !== 0) {
         style.transform = `rotate(${px(geometry.rotation)}deg)`
@@ -905,7 +922,13 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
             const fontSizeSlide = text.fontSize ?? dominant.fontSize ?? 18
             const lines = String(text.plain ?? '').split('\n')
             const lineHeight = fontSizeSlide * 1.2
-            const contentTop = geometry.y + insets.top
+            // 与 textEditStyle 相同的锚点补偿，保证光标行计算和编辑器首行对齐
+            const innerH = Math.max(0, geometry.h - insets.top - insets.bottom)
+            const textBlock = lines.length * lineHeight
+            let anchorPad = 0
+            if (text.anchor === 'middle') anchorPad = Math.max(0, (innerH - textBlock) / 2)
+            else if (text.anchor === 'bottom') anchorPad = Math.max(0, innerH - textBlock)
+            const contentTop = geometry.y + insets.top + anchorPad
             const contentLeft = geometry.x + insets.left
             // 行中心离点击 Y 最近的「非空行」；整框全空才落到第 0 行
             let lineIndex = 0
@@ -955,6 +978,17 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       const rendered = renderMode === 'fitted' && typeof renderUrl === 'function'
         ? renderUrl({ page: slideNumber, width: Math.round(Math.max(960, slideW * 2)), rev: deck.rev })
         : null
+
+      // DOM 桥接：刚提交的新 rev 还没有渲染好 PNG（LibreOffice 约 1.3s/页），
+      // 期间用 DOM 渲染显示新内容（renderShape 全量画），img 隐藏但仍在后台加载，
+      // onLoad 后清桥切回 PNG —— 用户看到的是"提交即生效"而不是旧图滞留。
+      const bridging = state.domBridgeRev !== null
+        && state.domBridgeRev === deck.rev
+        && renderMode === 'fitted'
+        && renderFailed !== true
+      const clearBridge = React.useCallback(() => {
+        if (store.get().domBridgeRev !== null) store.set({ domBridgeRev: null })
+      }, [store])
 
       const localPoint = React.useCallback((event) => {
         const host = hostRef.current
@@ -1112,17 +1146,19 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
             },
             // 精确渲染：LibreOffice 出的整页 PNG 作为底图（含母版元素）。
             // 失败或没装 LibreOffice 时 solved=false，自动退回 DOM 重画。
+            // 桥接期间隐藏 img（仍在后台加载，onLoad 清桥），DOM 全量渲染顶上。
             rendered !== null && renderMode === 'fitted' && renderFailed !== true
               ? h('img', {
                   className: 'dsh-ppt-rendered',
                   src: rendered,
                   alt: slide.name,
                   draggable: false,
-                  onError: () => setRenderFailed(true),
+                  onError: () => { setRenderFailed(true); clearBridge() },
+                  onLoad: clearBridge,
                   // 注意用幻灯片原生尺寸（slideW×slideH），不要乘 zoom —— 本元素在
                   // zoom 容器内，CSS zoom 会再乘一次，显式乘过就会双重缩放：
                   // zoom≠1 时 PNG 缩在角落而覆盖层是正常大小，表现即「高亮框不对齐」。
-                  style: { width: `${px(slideW)}px`, height: `${px(slideH)}px` },
+                  style: { width: `${px(slideW)}px`, height: `${px(slideH)}px`, display: bridging ? 'none' : 'block' },
                 })
               : null,
             h(SlideView, {
@@ -1137,8 +1173,8 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
               ghost,
               interactive: true,
               marquee: state.marquee,
-              // 底图已在时，DOM 只画高亮框，避免双重绘制。
-              overlayOnly: rendered !== null && renderMode === 'fitted' && renderFailed !== true,
+              // 底图已在且不在桥接期时，DOM 只画高亮框；桥接期 DOM 全量画新内容。
+              overlayOnly: rendered !== null && renderMode === 'fitted' && renderFailed !== true && !bridging,
             })),
             // 就地文字编辑器：渲染在**未缩放的 .dsh-ppt-canvas** 里（slidewrap 之外），
             // 坐标/字号/内边距都由 textEditStyle 手动 ×zoom —— textarea 不继承 zoom
@@ -2128,6 +2164,8 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
             selectedIds: current.selectedIds.filter(id => ids.has(id)),
             slideIndex: clamp(current.slideIndex, 0, Math.max(0, next.slides.length - 1)),
             error: null,
+            // 桥接到新 rev：PNG 在后台渲染，加载完 onLoad 自动切回
+            domBridgeRev: next.rev,
           }
         })
       }, [store])
