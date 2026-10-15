@@ -601,31 +601,49 @@ function setTextBody(element, paragraphs) {
     if (!hasExplicitRunStyle && oldRuns.length > 0) {
       const oldRunMeta = oldRuns.map((r) => {
         const t = childOf(r, 'a:t')
-        return { rPr: childOf(r, 'a:rPr'), len: t === undefined ? 0 : textOf(t).length }
+        return { rPr: childOf(r, 'a:rPr'), text: t === undefined ? '' : textOf(t) }
       })
-      const totalOld = oldRunMeta.reduce((sum, meta) => sum + meta.len, 0)
-      const oldRunIndexByChar = []
-      oldRunMeta.forEach((meta, runIndex) => { for (let i = 0; i < meta.len; i++) oldRunIndexByChar.push(runIndex) })
-      if (totalOld > 0) {
+      const oldText = oldRunMeta.map(meta => meta.text).join('')
+      if (newText !== '' && oldText !== '') {
+        // 前缀/后缀 diff 映射（原生 PPT 语义：被替换的区域取光标处字符的样式，
+        // 未动的部分各守原样式）。此前的「字符偏移 clamp 映射」在中间插入/删除
+        // 时会把后面所有字符的样式整体推移一格 —— 混排行直接乱掉（2026-10-15
+        // 用户实测："改一个字，字体有有大有小，排版全乱"）。
+        const oldRunIndexByChar = []
+        oldRunMeta.forEach((meta, runIndex) => { for (let i = 0; i < meta.text.length; i++) oldRunIndexByChar.push(runIndex) })
+        const minLen = Math.min(oldText.length, newText.length)
+        let prefix = 0
+        while (prefix < minLen && oldText[prefix] === newText[prefix]) prefix += 1
+        let suffix = 0
+        while (suffix < minLen - prefix && oldText[oldText.length - 1 - suffix] === newText[newText.length - 1 - suffix]) suffix += 1
+        const replacedEnd = newText.length - suffix
+        const rPrIndexFor = (i) => {
+          if (i < prefix) return oldRunIndexByChar[i] ?? 0
+          if (i < replacedEnd) {
+            // 被替换区域：取**光标前一个字符**的样式（PowerPoint 语义：新输入
+            // 沿用插入点之前的格式）；在行首插入时取第一个旧字符。
+            const anchor = Math.min(prefix > 0 ? prefix - 1 : 0, oldText.length - 1)
+            return oldRunIndexByChar[anchor] ?? 0
+          }
+          const oldTailStart = oldText.length - suffix
+          return oldRunIndexByChar[oldTailStart + (i - replacedEnd)] ?? 0
+        }
         let buffer = ''
-        let bufferRun = 0
-        let oldPos = 0
+        let bufferIdx = rPrIndexFor(0)
         const flush = () => {
           if (buffer === '') return
-          emitRun(oldRunMeta[bufferRun].rPr, buffer, {})
+          emitRun(oldRunMeta[bufferIdx].rPr, buffer, {})
           buffer = ''
         }
-        for (const ch of newText) {
-          const clamped = Math.min(oldPos, totalOld - 1)
-          const runIndex = oldRunIndexByChar[clamped] ?? 0
-          if (oldPos > 0 && runIndex !== bufferRun) flush()
-          bufferRun = runIndex
-          buffer += ch
-          oldPos += 1
+        for (let i = 0; i < newText.length; i++) {
+          const idx = rPrIndexFor(i)
+          if (i > 0 && idx !== bufferIdx) flush()
+          bufferIdx = idx
+          buffer += newText[i]
         }
         flush()
       } else {
-        // 旧段只有空 run：退回模板链
+        // 新文本或旧文本为空：退回模板链
         for (const run of newRuns) emitRun(resolveTemplateRPr(index), run.text ?? '', run)
       }
     } else {

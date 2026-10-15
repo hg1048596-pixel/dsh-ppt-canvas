@@ -413,21 +413,34 @@ check('patch: setText 逐字符沿用段内混排格式（原生 PPT 语义）',
   const deck1 = readDeck(injected, deckPath, 0)
   const title1 = deck1.slides[0].shapes.find(shape => shape.text !== null && shape.text.plain === 'AAAABB')
   assert(title1 !== undefined, 'injected mixed-run shape readable')
-  const patch = {
-    summary: '就地编辑',
+  // 场景 1：全选重打（前缀/后缀皆空）→ 整段取编辑起点字符的样式，合并为一个 run
+  const result1 = applyPatch(injected, deck1, deckPath, {
+    summary: '全选重打',
     ops: [{ op: 'setText', id: title1.id, paragraphs: [{ runs: [{ text: 'XXXXXX' }] }] }],
-  }
-  const result = applyPatch(injected, deck1, deckPath, patch, {})
-  const after = readDeck(result.buffer, deckPath, 1)
-  const title2 = after.slides[0].shapes.find(shape => shape.id === title1.id)
-  const runs = title2.text.paragraphs[0].runs
-  assertEqual(runs.length, 2, `同格式字符合并：6 字符应得到 2 个 run（got ${runs.length}）`)
-  assertEqual(runs[0].text, 'XXXX', '前 4 字符 = 新文本的前 4 个字符')
-  assert(Math.abs(runs[0].fontSize - 44 * 96 / 72) < 0.01, `前 4 字符字号沿用（got ${runs[0].fontSize}）`)
-  assertEqual(runs[0].color, '#FF0000', '前 4 字符颜色沿用')
-  assertEqual(runs[1].text, 'XX', '后 2 字符 = 新文本的后 2 个字符')
-  assert(Math.abs(runs[1].fontSize - 20 * 96 / 72) < 0.01, `后 2 字符字号沿用（got ${runs[1].fontSize}）`)
-  assertEqual(runs[1].color, '#000000', '后 2 字符颜色沿用')
+  }, {})
+  const after1 = readDeck(result1.buffer, deckPath, 1)
+  const t1 = after1.slides[0].shapes.find(shape => shape.id === title1.id)
+  const runs1 = t1.text.paragraphs[0].runs
+  assertEqual(runs1.length, 1, `全选重打应合并为一个 run（got ${runs1.length}）`)
+  assertEqual(runs1[0].text, 'XXXXXX')
+  assert(Math.abs(runs1[0].fontSize - 44 * 96 / 72) < 0.01, `取编辑起点样式（got ${runs1[0].fontSize}）`)
+  assertEqual(runs1[0].color, '#FF0000')
+
+  // 场景 2：中间插入（前缀 AAA / 后缀 BB 不动）→ 未动的部分各守原样式，边界不移动
+  const result2 = applyPatch(injected, deck1, deckPath, {
+    summary: '中间插入',
+    ops: [{ op: 'setText', id: title1.id, paragraphs: [{ runs: [{ text: 'AAAAXXBB' }] }] }],
+  }, {})
+  const after2 = readDeck(result2.buffer, deckPath, 1)
+  const t2 = after2.slides[0].shapes.find(shape => shape.id === title1.id)
+  const runs2 = t2.text.paragraphs[0].runs
+  assertEqual(runs2.length, 2, `中间插入不应推移样式边界（got ${runs2.length} runs: ${runs2.map(r => r.text).join('/')}）`)
+  assertEqual(runs2[0].text, 'AAAAXX')
+  assert(Math.abs(runs2[0].fontSize - 44 * 96 / 72) < 0.01, `前缀字号沿用（got ${runs2[0].fontSize}）`)
+  assertEqual(runs2[0].color, '#FF0000', '前缀颜色沿用')
+  assertEqual(runs2[1].text, 'BB')
+  assert(Math.abs(runs2[1].fontSize - 20 * 96 / 72) < 0.01, `后缀字号沿用（got ${runs2[1].fontSize}）`)
+  assertEqual(runs2[1].color, '#000000', '后缀颜色沿用')
 })
 
 check('patch: 复制出来的元素拿到新的 cNvPr id', () => {
