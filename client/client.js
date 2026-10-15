@@ -85,6 +85,29 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       ? 'sessions 服务不存在'
       : (typeof promptSessions.retain === 'function' ? 'sessions.retain 可用' : 'sessions 服务没有 retain()')
 
+    // 面板 store（install() 之后接上）。会话自愈要用它同步面板状态。
+    let appStore = null
+
+    /**
+     * 会话自愈：retain 报 unknown session（宿主重启过 / 会话被清理，而面板还
+     * 记着旧 id）时，从当前会话列表挑最新的一个顶上，并同步面板状态与偏好。
+     * @param {string} failedId 已失效的会话 id
+     * @returns {string | null} 顶上的新会话 id；列表为空则 null
+     */
+    const healStaleSession = (failedId) => {
+      const ids = listSessionIds()
+      const picked = ids.length > 0 ? ids[ids.length - 1] : null
+      if (picked !== null && picked !== failedId) {
+        diag = `会话 ${failedId} 已不存在（宿主可能重启过），已自动改连 ${picked}`
+        if (appStore !== null) {
+          try { appStore.set({ sessionId: picked, connectedSession: true, sessionMenuOpen: false }) } catch { /* 面板不可用也不影响重试 */ }
+        }
+      } else {
+        diag = `会话 ${failedId} 已不存在（宿主可能重启过），当前没有可用会话 —— 请先在 DSH 里打开一个对话，再点标题栏的会话按钮连接`
+      }
+      return picked
+    }
+
     /**
      * 读会话列表快照。`list` 是 ObservableSnapshot：有 `getSnapshot()` 就直接用，
      * 否则把实例本身当作快照（两种形态都兼容）。
@@ -174,8 +197,9 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
      * 订阅当前已连接会话的事件流。返回取消订阅的函数（拿不到会话就返回 no-op）。
      * @param {string} sessionId
      * @param {(state: {thinking: string, reply: string, error: string|null}) => void} emit
+     * @param {boolean} [alreadyHealed] 自愈重试只做一次，防止无限循环
      */
-    const watchAi = (sessionId, emit) => {
+    const watchAi = (sessionId, emit, alreadyHealed = false) => {
       if (promptSessions === undefined || typeof promptSessions.retain !== 'function') return () => {}
       if (typeof sessionId !== 'string' || sessionId === '') return () => {}
       let reference
@@ -202,7 +226,15 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
           emit({ thinking: '', reply: '', error: `取会话失败：${error instanceof Error ? error.message : String(error)}` })
         })
       } catch (error) {
-        emit({ thinking: '', reply: '', error: error instanceof Error ? error.message : String(error) })
+        const message = error instanceof Error ? error.message : String(error)
+        // 面板记着的会话 id 在宿主侧已不存在（重启过/被清理）：自动改连最新会话并重试一次。
+        if (!alreadyHealed && /unknown session/i.test(message)) {
+          const picked = healStaleSession(sessionId)
+          if (picked !== null && picked !== sessionId) {
+            return watchAi(picked, emit, true)
+          }
+        }
+        emit({ thinking: '', reply: '', error: message })
       }
       return () => {
         try { unsubscribe() } catch { /* 忽略 */ }
@@ -220,7 +252,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
      */
     const promptTo = promptSessions === undefined || typeof promptSessions.retain !== 'function'
       ? null
-      : async (text, sessionId) => {
+      : async (text, sessionId, alreadyHealed = false) => {
           if (typeof sessionId !== 'string' || sessionId === '') {
             return { ok: false, error: { code: 'no-session', message: '还没有连接会话' } }
           }
@@ -240,6 +272,13 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
             return { ok: false, error: { code: failure.code ?? 'rejected', message: failure.message ?? '会话没有接受这条指令' } }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
+            // 面板记着的会话 id 在宿主侧已不存在：自动改连最新会话并重试一次。
+            if (!alreadyHealed && /unknown session/i.test(message)) {
+              const picked = healStaleSession(sessionId)
+              if (picked !== null && picked !== sessionId) {
+                return promptTo(text, picked, true)
+              }
+            }
             diag = `投递失败：${message}`
             return { ok: false, error: { code: 'prompt-failed', message } }
           } finally {
@@ -444,6 +483,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
     })
 
     const installed = app.install()
+    appStore = installed.store // 会话自愈（healStaleSession）用它同步面板状态
 
     /**
      * 面板外壳。

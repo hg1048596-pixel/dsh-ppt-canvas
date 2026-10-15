@@ -2358,6 +2358,11 @@ function createPptApp(options) {
 
     React.useEffect(() => { actionsRef.current = actions }, [actions])
 
+    // 会话 id 变化（含会话自愈自动改连）时持久化，重启后不再拿到失效的旧 id。
+    React.useEffect(() => {
+      if (state.sessionId !== '') savePrefs({ sessionId: state.sessionId })
+    }, [state.sessionId])
+
     // 快捷键：Ctrl+Z / Ctrl+Shift+Z
     React.useEffect(() => {
       const onKey = (event) => {

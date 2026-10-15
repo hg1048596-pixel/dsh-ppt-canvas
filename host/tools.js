@@ -101,11 +101,73 @@ export function registerTools(tools, store, bus, logger) {
       PATCH_SCHEMA_NOTE,
     ].join('\n'),
     parameters: {
-      // 参数层也不能用 type:'json'：注册层能过（编译成无 type 的 annotation-only 节点），
-      // 但模型 API 的 function schema 校验会拒绝无 type 节点 —— 实测报错
-      // "Invalid schema for function 'ppt_canvas_apply': schema must be a JSON Schema of
-      // 'type: \"object\"', got 'type: null'"（2026-10-15）。patch 本身是对象，声明为开放 object。
-      patch: { type: 'object', additionalProperties: true, required: true, description: '修改方案对象：{ summary, ops: [...] }。' },
+      // patch 必须**完整声明结构**且 object 一律 additionalProperties:false：
+      // ① 布尔 additionalProperties:true 会被模型 API 的严格校验判为
+      //    "got 'type: null'"（2026-10-15 实测，request_id dc48fd7f…）；
+      // ② 运行时 validateArgs 按这个 schema 严格校验模型参数，声明即约束。
+      // 字段清单与 PATCH_SCHEMA_NOTE 一一对应；items 内不允许 required。
+      patch: {
+        type: 'object',
+        additionalProperties: false,
+        required: true,
+        description: '修改方案对象：{ summary, ops: [...] }。',
+        properties: {
+          summary: { type: 'string', description: '一句话说明改了什么。' },
+          ops: {
+            type: 'array',
+            required: true,
+            description: '修改操作列表，按顺序执行；任何一条失败则整份方案不落盘。',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                op: { type: 'string', description: 'setText/setTextStyle/setFill/setLine/setGeometry/move/resize/align/setZ/bringToFront/sendToBack/remove/duplicate 之一。' },
+                id: { type: 'string', description: '目标元素 id，来自 ppt_canvas_context 返回的 elements[].id。' },
+                ids: { type: 'array', items: { type: 'string' }, description: 'align 批量操作的目标 id 列表。' },
+                mode: { type: 'string', description: 'align 的模式：left/hcenter/right/top/vcenter/bottom/distributeH/distributeV。' },
+                paragraphs: {
+                  type: 'array',
+                  description: 'setText 的段落，每段 { runs: [{ text }] }。',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      align: { type: 'string' },
+                      runs: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          additionalProperties: false,
+                          properties: { text: { type: 'string' } },
+                        },
+                      },
+                    },
+                  },
+                },
+                color: { type: 'string', description: '#RRGGBB。' },
+                fontSize: { type: 'number', description: 'px。' },
+                bold: { type: 'boolean' },
+                italic: { type: 'boolean' },
+                underline: { type: 'boolean' },
+                align: { type: 'string', description: 'left/center/right。' },
+                fontFamily: { type: 'string' },
+                width: { type: 'number', description: 'setLine 的线宽 px。' },
+                dash: { type: 'string', description: 'solid/dash。' },
+                x: { type: 'number' },
+                y: { type: 'number' },
+                w: { type: 'number' },
+                h: { type: 'number' },
+                rotation: { type: 'number', description: '度。' },
+                dx: { type: 'number' },
+                dy: { type: 'number' },
+                dw: { type: 'number' },
+                dh: { type: 'number' },
+                z: { type: 'number' },
+              },
+            },
+          },
+        },
+      },
       dryRun: { type: 'boolean', description: '仅校验与试算，不写盘。' },
       requestId: { type: 'string', description: '本次修改对应的画布请求 id（用于版本冲突检测）。' },
     },
