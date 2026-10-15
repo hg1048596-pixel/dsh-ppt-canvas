@@ -367,8 +367,10 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         hoverId: null,
         zoom: typeof prefs.zoom === 'number' ? prefs.zoom : 1,
         marquee: null,
-        // 正在就地编辑文字的形状 id（null = 没有在编辑）。
+        // 正在就地编辑文字的形状 id（null = 没有在编辑）；editCaret = 打开编辑时的
+        // 点击点（幻灯片坐标），用于把光标放到用户点的行上（原生 PPT 手感）。
         editingId: null,
+        editCaret: null,
         instruction: '',
         sending: false,
         pendingRequestId: null,
@@ -632,6 +634,37 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
     }
 
     /**
+     * 整框的「主样式」：跨段落统计出现最多的字号与颜色。
+     * 编辑器是单字体 textarea，无法逐段显示不同字号 —— 用主字号让它与底图
+     * 的观感一致；也避免首行是空段（无字号）时整框退化成 18px 默认值
+     * （2026-10-15 用户实测"打两轮字突然变小"）。
+     */
+    function dominantRunStyle(shape) {
+      const paragraphs = shape.text?.paragraphs ?? []
+      const sizes = []
+      const colors = []
+      for (const p of paragraphs) {
+        for (const r of (p.runs ?? [])) {
+          if (Number.isFinite(r.fontSize) && r.fontSize > 0) sizes.push(r.fontSize)
+          if (typeof r.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(r.color)) colors.push(r.color.toUpperCase())
+        }
+      }
+      const dominant = (list) => {
+        if (list.length === 0) return null
+        const counts = new Map()
+        let best = null
+        let bestCount = 0
+        for (const value of list) {
+          const count = (counts.get(value) ?? 0) + 1
+          counts.set(value, count)
+          if (count > bestCount) { best = value; bestCount = count }
+        }
+        return best
+      }
+      return { fontSize: dominant(sizes), color: dominant(colors) }
+    }
+
+    /**
      * 就地文字编辑器的定位与近似样式。
      *
      * **必须手动乘 zoom**：这个元素渲染在 .dsh-ppt-canvas（未缩放）里，而不是
@@ -645,6 +678,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       const geometry = shape.geometry ?? {}
       const text = shape.text ?? {}
       const insets = text.insets ?? { left: 9.6, top: 4.8, right: 9.6, bottom: 4.8 }
+      const dominant = dominantRunStyle(shape)
       const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1
       const style = {
         position: 'absolute',
@@ -654,8 +688,8 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         height: `${px(Math.max(0, geometry.h) * z)}px`,
         boxSizing: 'border-box',
         padding: `${px(insets.top * z)}px ${px(insets.right * z)}px ${px(insets.bottom * z)}px ${px(insets.left * z)}px`,
-        color: text.color ?? '#111111',
-        fontSize: `${px((text.fontSize ?? 18) * z)}px`,
+        color: text.color ?? dominant.color ?? '#111111',
+        fontSize: `${px((text.fontSize ?? dominant.fontSize ?? 18) * z)}px`,
         fontWeight: text.bold === true ? 700 : 400,
         fontStyle: text.italic === true ? 'italic' : 'normal',
         fontFamily: text.fontFamily ?? 'inherit',
@@ -842,7 +876,9 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       const height = slideH * zoom
       // 拖动移动的手势预览：{ ids: [...], dx, dy }（幻灯片 px）。松手才提交 move op。
       const [ghost, setGhost] = React.useState(null)
-      // 就地编辑：textarea 挂载后立刻聚焦（点出光标就打字）。
+      // 就地编辑：textarea 挂载后立刻聚焦（点出光标就打字），并把光标放到用户
+      // 点击的那一行 —— 否则光标落在第 0 字符，而文本框常以空行开头，打字就会
+      // 进了无样式的空段落（实测"打两轮字突然变小"的另一半根因）。
       // 注意 preventScroll + 滚动复位：Chromium 对「zoom 容器内的元素聚焦」会按
       // **未缩放坐标**做 scroll-into-view，直接把 overflow:auto 的画布容器滚出内容区
       // —— 用户看到的就是「一点组件整个画板就消失」（实测 2026-10-15）。
@@ -856,6 +892,36 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
           if (wrap !== null && wrap !== undefined) {
             wrap.scrollTop = top
             wrap.scrollLeft = left
+          }
+          // 光标就近放到点击点上：在**有字的行**里选离点击 Y 最近的一行（空行不可见，
+          // 按原始几何映射会把光标放进不可见的空段落），列 ≈ x / 平均字宽。
+          const caret = state.editCaret
+          const shape = editingShape
+          if (caret !== null && caret !== undefined && shape !== null && shape.text !== null && shape.text !== undefined) {
+            const geometry = shape.geometry ?? {}
+            const text = shape.text ?? {}
+            const insets = text.insets ?? { left: 9.6, top: 4.8, right: 9.6, bottom: 4.8 }
+            const dominant = dominantRunStyle(shape)
+            const fontSizeSlide = text.fontSize ?? dominant.fontSize ?? 18
+            const lines = String(text.plain ?? '').split('\n')
+            const lineHeight = fontSizeSlide * 1.2
+            const contentTop = geometry.y + insets.top
+            const contentLeft = geometry.x + insets.left
+            // 行中心离点击 Y 最近的「非空行」；整框全空才落到第 0 行
+            let lineIndex = 0
+            let bestDistance = Number.POSITIVE_INFINITY
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].trim() === '') continue
+              const center = contentTop + lineHeight * (i + 0.5)
+              const distance = Math.abs(center - caret.y)
+              if (distance < bestDistance) { bestDistance = distance; lineIndex = i }
+            }
+            const charWidth = Math.max(4, fontSizeSlide * 0.55)
+            const column = clamp(Math.round((caret.x - contentLeft) / charWidth), 0, lines[lineIndex]?.length ?? 0)
+            let offset = 0
+            for (let i = 0; i < lineIndex; i++) offset += lines[i].length + 1
+            offset += column
+            editRef.current.setSelectionRange(offset, offset)
           }
         }
       }, [state.editingId])
@@ -946,9 +1012,9 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
           setGhost(null)
           if (!dragging) {
             // 单击（没有拖动）带文字的形状：直接进入就地编辑 —— 点出光标就打字。
-            // 加选（shift/ctrl）或多选状态下不进入，保留框选/多选手势。
+            // editCaret 记下点击点，编辑器把光标放到用户点的那一行（而不是第 0 字符）。
             if (!additive && next.length === 1 && next[0] === shape.id && shape.text !== null && shape.text !== undefined) {
-              store.set({ editingId: shape.id })
+              store.set({ editingId: shape.id, editCaret: { x: point.x, y: point.y } })
             }
             return
           }

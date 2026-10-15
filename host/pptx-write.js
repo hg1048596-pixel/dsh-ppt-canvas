@@ -497,12 +497,44 @@ function setTextBody(element, paragraphs) {
   for (const p of existing) removeChild(txBody, p)
   removeChildren(txBody, 'a:endParaRPr')
 
+  // 空段/无格式段的样式兜底链（2026-10-15 用户实测"打两轮字突然变小"）：
+  // 用户在空行上打字时，该段没有带格式的 run —— 若模板退化为默认值，这一行
+  // 就按母版默认字号渲染，下一轮编辑器也跟着变小。兜底顺序：
+  //   映射段的首 run rPr → 映射段的 endParaRPr（**必须真带格式**：有 sz 或
+  //   solidFill，否则很多空段的 endParaRPr 只有 lang，会把兜底链提前掐断）
+  //   → 向后找最近带样式 run 的段 → 向前找 → 都没有才用默认值。
+  const styledRPrOf = (p) => {
+    if (p === undefined) return undefined
+    const runs = childrenOf(p)
+    const r = runs.find(child => child.name === 'a:r') ?? runs.find(child => child.name === 'a:fld')
+    return r === undefined ? undefined : childOf(r, 'a:rPr')
+  }
+  const carriesFormatting = (rPr) => {
+    if (rPr === undefined) return false
+    if (getAttr(rPr, 'sz') !== undefined) return true
+    return childOf(rPr, 'a:solidFill') !== undefined
+  }
+  const resolveTemplateRPr = (mappedIndex) => {
+    const source = existing.length > 0 ? existing[Math.min(mappedIndex, existing.length - 1)] : undefined
+    const direct = styledRPrOf(source)
+    if (direct !== undefined) return direct
+    const sourceEnd = childOf(source, 'a:endParaRPr')
+    if (carriesFormatting(sourceEnd)) return sourceEnd
+    for (let i = Math.min(mappedIndex, existing.length - 1); i < existing.length; i++) {
+      const r = styledRPrOf(existing[i])
+      if (r !== undefined) return r
+    }
+    for (let i = Math.min(mappedIndex, existing.length - 1); i >= 0; i--) {
+      const r = styledRPrOf(existing[i])
+      if (r !== undefined) return r
+    }
+    return undefined
+  }
+
   paragraphs.forEach((paragraph, index) => {
     const source = existing.length > 0 ? existing[Math.min(index, existing.length - 1)] : undefined
     const templatePPr = source === undefined ? undefined : childOf(source, 'a:pPr')
-    const sourceRuns = source === undefined ? [] : childrenOf(source)
-    const sourceRun = sourceRuns.find(child => child.name === 'a:r') ?? sourceRuns.find(child => child.name === 'a:fld')
-    const templateRPr = sourceRun === undefined ? undefined : childOf(sourceRun, 'a:rPr')
+    const templateRPr = resolveTemplateRPr(index)
     const p = createElement('a:p')
     const align = paragraph.align
     if (templatePPr !== undefined || align !== undefined) {
