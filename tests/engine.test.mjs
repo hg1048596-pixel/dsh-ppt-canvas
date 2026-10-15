@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseXml, serializeXml, findAll, findFirst, textOf, createElement, appendChild } from '../host/xml.js'
+import { parseXml, serializeXml, findAll, findFirst, textOf, createElement, appendChild, childrenOf, childOf, removeChild, removeChildren, setAttr, setText } from '../host/xml.js'
 import { readZipEntries, readZip, writeZip, crc32 } from '../host/zip.js'
 import { readDeck, loadPackage, deckKeyOf } from '../host/pptx-read.js'
 import { applyPatch } from '../host/pptx-write.js'
@@ -296,6 +296,78 @@ check('patch: 混合补丁应用后回读一致', () => {
   // （对齐会改写 x，所以这里只校验未被对齐覆盖的尺寸字段。）
   assertEqual(titleAfter.geometry.w, 900, 'geometry w round-trips exactly')
   assertEqual(titleAfter.geometry.h, 90, 'geometry h round-trips exactly')
+})
+
+check('patch: setText 逐段沿用旧段落样式（空首行不再把整框拉平成默认值）', () => {
+  // 真实场景（2026-10-15 用户实测）：文本框第一段是空行（无 pPr / 无带格式 run），
+  // 用户就地改一个字，客户端只发 {runs:[{text}]} —— 样式必须逐段保住，
+  // 否则字号 / 颜色 / 对齐全部退化成默认值。
+  const before = readFileSync(deckPath)
+  const zipEntries = readZipEntries(before)
+  const slide1Xml = Buffer.from(zipEntries.find(entry => entry.name === 'ppt/slides/slide1.xml').data).toString('utf8')
+  const root = parseXml(slide1Xml)
+
+  // 找 slide1 里第一个带非空文本的 sp，把它的 txBody 换成：
+  // 第 1 段 = 空行（无 pPr 无 run），第 2 段 = sz=4400 / b=1 / FFC000 / 居中。
+  const sps = findAll(root, 'p:sp')
+  const titleSp = sps.find(sp => findAll(sp, 'a:t').some(t => textOf(t).trim() !== ''))
+  assert(titleSp !== undefined, 'fixture slide1 has a text shape')
+  const txBody = findFirst(titleSp, 'p:txBody')
+  assert(txBody !== undefined, 'the text shape has a txBody')
+  for (const p of childrenOf(txBody, 'a:p')) removeChild(txBody, p)
+  removeChildren(txBody, 'a:endParaRPr')
+  appendChild(txBody, createElement('a:p'))
+  const p2 = createElement('a:p')
+  appendChild(p2, createElement('a:pPr', { algn: 'ctr' }))
+  const r2 = createElement('a:r')
+  const rPr2 = createElement('a:rPr', { lang: 'zh-CN', sz: '4400', b: '1' })
+  const fill2 = createElement('a:solidFill')
+  appendChild(fill2, createElement('a:srgbClr', { val: 'FFC000' }))
+  appendChild(rPr2, fill2)
+  appendChild(r2, rPr2)
+  const t2 = createElement('a:t')
+  setText(t2, '原标题第二行')
+  appendChild(r2, t2)
+  appendChild(p2, r2)
+  appendChild(txBody, p2)
+  const injected = writeZip(zipEntries.map(entry => ({
+    name: entry.name,
+    data: entry.name === 'ppt/slides/slide1.xml' ? Buffer.from(serializeXml(root)) : entry.data,
+  })))
+
+  const ptPx = 44 * 96 / 72 // sz=4400 → 44pt → px
+  const deck1 = readDeck(injected, deckPath, 0)
+  const title1 = deck1.slides[0].shapes.find(shape => shape.text !== null && shape.text.plain.includes('原标题第二行'))
+  assert(title1 !== undefined, 'injected text readable from the deck model')
+  const styledBefore = title1.text.paragraphs[1].runs[0]
+  assert(Math.abs(styledBefore.fontSize - ptPx) < 0.01, `styled run fontSize parses (got ${styledBefore.fontSize})`)
+
+  // 就地编辑提交形态：三段纯文本（空行 / 改后 / 新增），不带任何样式字段。
+  const patch = {
+    summary: '就地编辑',
+    ops: [{
+      op: 'setText',
+      id: title1.id,
+      paragraphs: [
+        { runs: [{ text: '' }] },
+        { runs: [{ text: '改一个字' }] },
+        { runs: [{ text: '新增一行' }] },
+      ],
+    }],
+  }
+  const result = applyPatch(injected, deck1, deckPath, patch, {})
+  assert(result.buffer.length > 1000, 'patch applied')
+  const after = readDeck(result.buffer, deckPath, 1)
+  const title2 = after.slides[0].shapes.find(shape => shape.id === title1.id)
+  assertEqual(title2.text.plain, '\n改一个字\n新增一行')
+  const kept = title2.text.paragraphs[1].runs[0]
+  assert(Math.abs(kept.fontSize - ptPx) < 0.01, `第二段字号保留（got ${kept.fontSize}）`)
+  assertEqual(kept.color, '#FFC000', '第二段颜色保留')
+  assertEqual(kept.bold, true, '第二段加粗保留')
+  assertEqual(title2.text.paragraphs[1].align, 'center', '第二段对齐保留')
+  const added = title2.text.paragraphs[2].runs[0]
+  assert(Math.abs(added.fontSize - ptPx) < 0.01, `新增段沿用最后一个旧段落的样式（got ${added.fontSize}）`)
+  assertEqual(added.color, '#FFC000', '新增段颜色沿用')
 })
 
 check('patch: 复制出来的元素拿到新的 cNvPr id', () => {

@@ -474,7 +474,16 @@ function applyParagraphAlign(p, align) {
   setAttr(pPr, 'algn', ooxml)
 }
 
-/** 用段落数组替换 txBody 的内容，保留第一段的 run 属性作为模板。 */
+/**
+ * 用段落数组替换 txBody 的内容，逐段沿用旧段落的样式。
+ *
+ * 为什么是「逐段」而不是「拿第一段当全局模板」（2026-10-15 用户实测教训）：
+ * 客户端的 setText 只发 {runs:[{text}]}（就地编辑 / 属性面板 / AI 都一样），
+ * 段落的 pPr 与 run 的 rPr 全靠这里保住。文本框常以**空段落开头**（plain 以
+ * 换行开头），空段没有带格式的 run —— 拿它当模板会把后续段的字号/颜色/对齐
+ * 全部拉平成默认值，用户改一个字，整框排版和大小就丢了。
+ * 新段落 i 对应旧段落 i（越界沿用最后一个旧段落），显式给出的样式仍优先生效。
+ */
 function setTextBody(element, paragraphs) {
   let txBody = txBodyFor(element)
   if (txBody === undefined) {
@@ -484,15 +493,16 @@ function setTextBody(element, paragraphs) {
     appendChild(element, txBody)
   }
   const existing = childrenOf(txBody, 'a:p')
-  const templatePPr = existing.length > 0 ? childOf(existing[0], 'a:pPr') : undefined
-  const templateRun = existing.length > 0 ? childOf(existing[0], 'a:r') : undefined
-  const templateRPr = templateRun === undefined ? undefined : childOf(templateRun, 'a:rPr')
   const templateEnd = childOf(txBody, 'a:endParaRPr')
-
   for (const p of existing) removeChild(txBody, p)
   removeChildren(txBody, 'a:endParaRPr')
 
   paragraphs.forEach((paragraph, index) => {
+    const source = existing.length > 0 ? existing[Math.min(index, existing.length - 1)] : undefined
+    const templatePPr = source === undefined ? undefined : childOf(source, 'a:pPr')
+    const sourceRuns = source === undefined ? [] : childrenOf(source)
+    const sourceRun = sourceRuns.find(child => child.name === 'a:r') ?? sourceRuns.find(child => child.name === 'a:fld')
+    const templateRPr = sourceRun === undefined ? undefined : childOf(sourceRun, 'a:rPr')
     const p = createElement('a:p')
     const align = paragraph.align
     if (templatePPr !== undefined || align !== undefined) {
