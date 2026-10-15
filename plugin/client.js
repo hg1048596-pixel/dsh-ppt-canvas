@@ -632,23 +632,30 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
     }
 
     /**
-     * 就地文字编辑器的定位与近似样式：几何位置精确，字体度量是近似值
-     * （LibreOffice 用的字体 Web 端不一定有），提交后以底图重渲染为准。
+     * 就地文字编辑器的定位与近似样式。
+     *
+     * **必须手动乘 zoom**：这个元素渲染在 .dsh-ppt-canvas（未缩放）里，而不是
+     * .dsh-ppt-slidewrap（zoom 容器）里 —— Chromium 对表单控件（textarea）的
+     * CSS zoom 继承有版本差异（实测 2026-10-15：Chrome 下 textarea 不被 zoom
+     * 缩放，编辑器按幻灯片原尺寸错位渲染，用户看到的就是「点了没反应」）。
+     * 坐标 × zoom 后，编辑器与覆盖层在任何 Chromium 版本都精确重合。
+     * 字体度量仍是近似值（LibreOffice 字体 Web 端未必有），提交后以底图为准。
      */
-    function textEditStyle(shape) {
+    function textEditStyle(shape, zoom) {
       const geometry = shape.geometry ?? {}
       const text = shape.text ?? {}
       const insets = text.insets ?? { left: 9.6, top: 4.8, right: 9.6, bottom: 4.8 }
+      const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1
       const style = {
         position: 'absolute',
-        left: `${px(geometry.x)}px`,
-        top: `${px(geometry.y)}px`,
-        width: `${px(Math.max(0, geometry.w))}px`,
-        height: `${px(Math.max(0, geometry.h))}px`,
+        left: `${px(geometry.x * z)}px`,
+        top: `${px(geometry.y * z)}px`,
+        width: `${px(Math.max(0, geometry.w) * z)}px`,
+        height: `${px(Math.max(0, geometry.h) * z)}px`,
         boxSizing: 'border-box',
-        padding: `${px(insets.top)}px ${px(insets.right)}px ${px(insets.bottom)}px ${px(insets.left)}px`,
+        padding: `${px(insets.top * z)}px ${px(insets.right * z)}px ${px(insets.bottom * z)}px ${px(insets.left * z)}px`,
         color: text.color ?? '#111111',
-        fontSize: `${px(text.fontSize ?? 18)}px`,
+        fontSize: `${px((text.fontSize ?? 18) * z)}px`,
         fontWeight: text.bold === true ? 700 : 400,
         fontStyle: text.italic === true ? 'italic' : 'normal',
         fontFamily: text.fontFamily ?? 'inherit',
@@ -1067,7 +1074,10 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
               // 底图已在时，DOM 只画高亮框，避免双重绘制。
               overlayOnly: rendered !== null && renderMode === 'fitted' && renderFailed !== true,
             })),
-            // 就地文字编辑器：叠在被编辑形状的几何位置上，样式取自该形状的文本属性。
+            // 就地文字编辑器：渲染在**未缩放的 .dsh-ppt-canvas** 里（slidewrap 之外），
+            // 坐标/字号/内边距都由 textEditStyle 手动 ×zoom —— textarea 不继承 zoom
+            // 容器的缩放，放进 slidewrap 会按幻灯片原尺寸渲染而覆盖层是缩放后的，
+            // 除 zoom=1 外全部错位（实测 2026-10-15，Chrome）。
             // 打字期间底图 PNG 还是旧内容，提交（失焦）后 apply → rev 变化 → 底图重渲染。
             editingShape !== null && editingShape.text !== null && editingShape.text !== undefined
               ? h('textarea', {
@@ -1095,7 +1105,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
                       paragraphs: value.split('\n').map(line => ({ runs: [{ text: line }] })),
                     }], '编辑文字')
                   },
-                  style: textEditStyle(editingShape),
+                  style: textEditStyle(editingShape, zoom),
                 })
               : null,
           ),
