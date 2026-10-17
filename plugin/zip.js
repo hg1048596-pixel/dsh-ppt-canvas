@@ -27,6 +27,16 @@ const DOS_DATE = 0x0021
 /** 通用位标记：bit 11 = 文件名为 UTF-8。 */
 const FLAG_UTF8 = 0x0800
 
+/**
+ * 解压预算（防 zip bomb）。
+ *
+ * 只靠 central directory 的 usize 挡不住：解压发生在比对之前，且攻击者可以把
+ * usize 写小。单条上限取 256MB（PPTX 里最大的合法条目也不会超过这个量级），
+ * 全包上限 1GB，留足余量又不会把宿主拖死。
+ */
+const MAX_ENTRY_INFLATED_BYTES = 256 * 1024 * 1024
+const MAX_TOTAL_INFLATED_BYTES = 1024 * 1024 * 1024
+
 /** 构造带稳定 code 的 Error。 */
 function fail(code, message, details) {
   const error = new Error(message)
@@ -123,6 +133,8 @@ export function readZipEntries(buffer) {
 
   const out = []
   const seen = new Set()
+  /** 累计解压字节（zip bomb 预算）。 */
+  let totalInflated = 0
   let p = cdOffset
   for (let i = 0; i < total; i++) {
     if (p + 46 > buf.length) throw fail('ioFailed', `truncated central directory at entry ${i}`)
@@ -162,9 +174,15 @@ export function readZipEntries(buffer) {
       data = raw
     } else if (method === 8) {
       try {
-        const inflated = inflateRawSync(raw)
+        // **必须给 maxOutputLength**：只靠 central directory 里的 usize 是不够的
+        // —— 解压发生在比对之前，一个几十 KB 的 entry 可以声明/实际展开到几 GB，
+        // Node 会直接分配大 buffer，把宿主 OOM。上传路径（/api/files）接受任意 pptx。
+        const inflated = inflateRawSync(raw, { maxOutputLength: MAX_ENTRY_INFLATED_BYTES })
         data = new Uint8Array(inflated.buffer, inflated.byteOffset, inflated.byteLength)
       } catch (error) {
+        if (error?.code === 'ERR_BUFFER_TOO_LARGE' || /maxOutputLength|too large/i.test(String(error?.message))) {
+          throw fail('ioFailed', `entry ${name} inflates beyond ${MAX_ENTRY_INFLATED_BYTES} bytes; refusing (possible zip bomb)`)
+        }
         throw fail('ioFailed', `cannot inflate entry ${name}: ${error.message}`)
       }
     } else {
@@ -172,6 +190,14 @@ export function readZipEntries(buffer) {
     }
     if (usize !== data.length) {
       throw fail('ioFailed', `central directory size mismatch for entry ${name} (expected ${usize}, got ${data.length})`)
+    }
+    // CRC 校验：corrupt 但长度一致的条目以前会被静默接受。
+    if (crc !== undefined && crc !== 0 && crc32(data) !== crc) {
+      throw fail('ioFailed', `CRC mismatch for entry ${name}`)
+    }
+    totalInflated += data.length
+    if (totalInflated > MAX_TOTAL_INFLATED_BYTES) {
+      throw fail('ioFailed', `archive inflates beyond ${MAX_TOTAL_INFLATED_BYTES} bytes in total; refusing`)
     }
     out.push({ name, method, crc32: crc, csize, usize, localOff, flags, utf8: (flags & FLAG_UTF8) !== 0, data, raw })
   }

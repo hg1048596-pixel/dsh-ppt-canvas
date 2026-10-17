@@ -57,6 +57,26 @@ const ALIGN_MODES = ['left', 'hcenter', 'right', 'top', 'vcenter', 'bottom', 'di
  * 校验一个 patch。
  * @returns {{violations: object[], ops: object[]}}
  */
+/**
+ * 校验该元素是否支持填色/描边。
+ *
+ * 不支持的两类（写进去就是非法 OOXML）：
+ *   - `p:graphicFrame`（表格/图表）：填充属性属于单元格/图形内部，不是 xfrm
+ *   - `p:grpSp`（组合）：它只有 p:grpSpPr，没有可填的几何形状
+ */
+function rejectUnsupportedPaint(deck, id, index, op, what, violations) {
+  const found = elementById(deck, id)
+  if (found === undefined) return
+  const kind = found.shape?.kind
+  if (kind !== 'table' && kind !== 'chart' && kind !== 'group') return
+  violations.push({
+    index,
+    op,
+    field: 'id',
+    message: `element ${id} (${kind}) does not support ${what}; ${what === 'fill' ? 'tables/charts/groups have no fillable geometry' : 'groups have no stroke of their own'}`,
+  })
+}
+
 export function validatePatch(deck, patch) {
   const violations = []
   const ops = []
@@ -195,6 +215,10 @@ export function validatePatch(deck, patch) {
       case 'setFill': {
         const id = idAt()
         const color = colorAt('color', { required: true })
+        // 不是所有元素都能填色：表格/图表是 p:graphicFrame，其 p:xfrm 只能放
+        // a:off/a:ext；组合是 p:grpSpPr。往这些容器插 a:solidFill 会产出非法 OOXML，
+        // PowerPoint 可能提示"修复"，而接口还报 applied。
+        if (id !== undefined) rejectUnsupportedPaint(deck, id, index, op, 'fill', violations)
         if (id !== undefined && color !== undefined) ops.push({ index, op, id, color })
         break
       }
@@ -202,6 +226,8 @@ export function validatePatch(deck, patch) {
         const id = idAt()
         const color = colorAt('color')
         const width = numberAt('width', { min: 0 })
+        // 组合的描边在 p:grpSpPr 里不合法；表格/图表的边框属于单元格/图形内部结构。
+        if (id !== undefined) rejectUnsupportedPaint(deck, id, index, op, 'line', violations)
         if (raw.dash !== undefined && !['solid', 'dash', 'dot', 'lgDash', 'sysDash', 'sysDot'].includes(raw.dash)) {
           violations.push({ index, op, field: 'dash', message: 'dash must be solid|dash|dot|lgDash|sysDash|sysDot' })
         }
@@ -348,18 +374,42 @@ function geometryOf(element) {
 }
 
 /** 确保 a:xfrm 存在并返回它。 */
-function ensureTransform(element) {
+/** 元素是否自带 a:xfrm（真实占位符通常没有：几何继承自 layout/master）。 */
+function hasTransform(element) {
+  if (element === undefined || element === null) return false
+  if (element.name === 'p:graphicFrame') return childOf(element, 'p:xfrm') !== undefined
+  const spPr = spPrFor(element)
+  return spPr !== undefined && childOf(spPr, 'a:xfrm') !== undefined
+}
+
+/**
+ * 确保 a:xfrm 存在并返回它。
+ *
+ * `seed` = 这个元素**继承来的**几何（来自 deck 模型）。缺少它时，新建的 xfrm
+ * 会写成 off=0/ext=0 —— 对占位符来说等于把继承的尺寸**物化成 0×0**，
+ * 形状会被压没。所以调用方必须传 seed（除非确实要 0 尺寸）。
+ *
+ * @param {object} element
+ * @param {{x:number,y:number,w:number,h:number}|null} [seed]
+ */
+function ensureTransform(element, seed = null) {
+  const initialOff = seed === null || seed === undefined
+    ? { x: '0', y: '0' }
+    : { x: String(pxToEmu(seed.x)), y: String(pxToEmu(seed.y)) }
+  const initialExt = seed === null || seed === undefined
+    ? { cx: '0', cy: '0' }
+    : { cx: String(pxToEmu(Math.max(1, seed.w))), cy: String(pxToEmu(Math.max(1, seed.h))) }
   if (element.name === 'p:graphicFrame') {
     let xfrm = childOf(element, 'p:xfrm')
     if (xfrm === undefined) {
       xfrm = createElement('p:xfrm')
-      appendChild(xfrm, createElement('a:off', { x: '0', y: '0' }))
-      appendChild(xfrm, createElement('a:ext', { cx: '0', cy: '0' }))
+      appendChild(xfrm, createElement('a:off', initialOff))
+      appendChild(xfrm, createElement('a:ext', initialExt))
       element.children.unshift(xfrm)
       xfrm.parent = element
     }
-    if (childOf(xfrm, 'a:off') === undefined) appendChild(xfrm, createElement('a:off', { x: '0', y: '0' }))
-    if (childOf(xfrm, 'a:ext') === undefined) appendChild(xfrm, createElement('a:ext', { cx: '0', cy: '0' }))
+    if (childOf(xfrm, 'a:off') === undefined) appendChild(xfrm, createElement('a:off', initialOff))
+    if (childOf(xfrm, 'a:ext') === undefined) appendChild(xfrm, createElement('a:ext', initialExt))
     return xfrm
   }
   let spPr = childOf(element, 'p:spPr')
@@ -375,13 +425,13 @@ function ensureTransform(element) {
     spPr.children.unshift(xfrm)
     xfrm.parent = spPr
   }
-  if (childOf(xfrm, 'a:off') === undefined) appendChild(xfrm, createElement('a:off', { x: '0', y: '0' }))
-  if (childOf(xfrm, 'a:ext') === undefined) appendChild(xfrm, createElement('a:ext', { cx: '0', cy: '0' }))
+  if (childOf(xfrm, 'a:off') === undefined) appendChild(xfrm, createElement('a:off', initialOff))
+  if (childOf(xfrm, 'a:ext') === undefined) appendChild(xfrm, createElement('a:ext', initialExt))
   return xfrm
 }
 
-function setTransform(element, geometry) {
-  const xfrm = ensureTransform(element)
+function setTransform(element, geometry, seed = null) {
+  const xfrm = ensureTransform(element, seed)
   const off = childOf(xfrm, 'a:off')
   const ext = childOf(xfrm, 'a:ext')
   if (geometry.x !== undefined) setAttr(off, 'x', String(pxToEmu(geometry.x)))
@@ -776,6 +826,33 @@ export function applyPatch(buffer, deck, filePath, rawPatch, options = {}) {
     if (match !== null) slideIdToPart.set(`s${match[1]}`, part)
   }
 
+  /**
+   * deck 模型里各形状的**有效几何**（已含 layout→master 继承）。
+   * 写入端必须用它做基线：真实占位符的 XML 里没有 a:xfrm，
+   * 若从 XML 取 0 做 move/resize 的基准，会把继承来的尺寸物化成 0×0。
+   */
+  const deckGeometry = new Map()
+  for (const slide of deck?.slides ?? []) {
+    for (const shape of slide.shapes ?? []) {
+      if (shape?.id !== undefined && shape?.geometry !== undefined) {
+        deckGeometry.set(shape.id, shape.geometry)
+      }
+    }
+  }
+
+  /** 取某个 op 目标的几何基线：XML 有 xfrm 用 XML，否则用 deck 的继承几何。 */
+  const baseGeometry = (id, element) => {
+    if (hasTransform(element)) return geometryOf(element)
+    const inherited = deckGeometry.get(id)
+    if (inherited !== undefined) {
+      return { x: inherited.x, y: inherited.y, w: inherited.w, h: inherited.h }
+    }
+    throw new PatchError(
+      'badRequest',
+      `element ${id} has no a:xfrm and no inherited geometry; refusing to rewrite it as 0x0`,
+    )
+  }
+
   /** 已解析的 slide 树缓存（同一 part 只解析一次）。 */
   const parsedParts = new Map()
   const loadPart = (partName) => {
@@ -861,7 +938,10 @@ export function applyPatch(buffer, deck, filePath, rawPatch, options = {}) {
       }
       case 'setGeometry': {
         const target = targetOf(op.id)
-        setTransform(target.element, { x: op.x, y: op.y, w: op.w, h: op.h, rotation: op.rotation })
+        // 占位符没有 xfrm：先用继承几何铺底，再写入用户给的字段，
+        // 否则未提供的字段会变成 0（把继承位置钉到左上角 / 尺寸压成 0）。
+        const seed = hasTransform(target.element) ? null : baseGeometry(op.id, target.element)
+        setTransform(target.element, { x: op.x, y: op.y, w: op.w, h: op.h, rotation: op.rotation }, seed)
         touchedParts.add(target.partName)
         changed.add(op.id)
         results.push({ index, op: op.op, id: op.id, status: 'applied', note: null })
@@ -869,8 +949,8 @@ export function applyPatch(buffer, deck, filePath, rawPatch, options = {}) {
       }
       case 'move': {
         const target = targetOf(op.id)
-        const geometry = geometryOf(target.element)
-        setTransform(target.element, { x: geometry.x + op.dx, y: geometry.y + op.dy })
+        const geometry = baseGeometry(op.id, target.element)
+        setTransform(target.element, { x: geometry.x + op.dx, y: geometry.y + op.dy }, geometry)
         touchedParts.add(target.partName)
         changed.add(op.id)
         results.push({ index, op: op.op, id: op.id, status: 'applied', note: null })
@@ -878,8 +958,8 @@ export function applyPatch(buffer, deck, filePath, rawPatch, options = {}) {
       }
       case 'resize': {
         const target = targetOf(op.id)
-        const geometry = geometryOf(target.element)
-        setTransform(target.element, { w: Math.max(1, geometry.w + op.dw), h: Math.max(1, geometry.h + op.dh) })
+        const geometry = baseGeometry(op.id, target.element)
+        setTransform(target.element, { w: Math.max(1, geometry.w + op.dw), h: Math.max(1, geometry.h + op.dh) }, geometry)
         touchedParts.add(target.partName)
         changed.add(op.id)
         results.push({ index, op: op.op, id: op.id, status: 'applied', note: null })
@@ -887,7 +967,10 @@ export function applyPatch(buffer, deck, filePath, rawPatch, options = {}) {
       }
       case 'align': {
         const targets = op.ids.map(targetOf)
-        const boxes = targets.map(target => ({ target, geometry: geometryOf(target.element) }))
+        const boxes = targets.map((target, boxIndex) => ({
+          target,
+          geometry: baseGeometry(op.ids[boxIndex], target.element),
+        }))
         const minX = Math.min(...boxes.map(box => box.geometry.x))
         const maxX = Math.max(...boxes.map(box => box.geometry.x + box.geometry.w))
         const minY = Math.min(...boxes.map(box => box.geometry.y))
@@ -902,18 +985,19 @@ export function applyPatch(buffer, deck, filePath, rawPatch, options = {}) {
           const gap = (span - total) / Math.max(1, sorted.length - 1)
           let cursor = horizontal ? minX : minY
           for (const box of sorted) {
-            if (horizontal) setTransform(box.target.element, { x: cursor })
-            else setTransform(box.target.element, { y: cursor })
+            // seed = 该元素的有效几何：无 xfrm 的占位符必须靠它铺底，否则宽高会被写成 0
+            if (horizontal) setTransform(box.target.element, { x: cursor }, box.geometry)
+            else setTransform(box.target.element, { y: cursor }, box.geometry)
             cursor += (horizontal ? box.geometry.w : box.geometry.h) + gap
           }
         } else {
           for (const box of boxes) {
-            if (op.mode === 'left') setTransform(box.target.element, { x: minX })
-            else if (op.mode === 'right') setTransform(box.target.element, { x: maxX - box.geometry.w })
-            else if (op.mode === 'hcenter') setTransform(box.target.element, { x: centerX - box.geometry.w / 2 })
-            else if (op.mode === 'top') setTransform(box.target.element, { y: minY })
-            else if (op.mode === 'bottom') setTransform(box.target.element, { y: maxY - box.geometry.h })
-            else if (op.mode === 'vcenter') setTransform(box.target.element, { y: centerY - box.geometry.h / 2 })
+            if (op.mode === 'left') setTransform(box.target.element, { x: minX }, box.geometry)
+            else if (op.mode === 'right') setTransform(box.target.element, { x: maxX - box.geometry.w }, box.geometry)
+            else if (op.mode === 'hcenter') setTransform(box.target.element, { x: centerX - box.geometry.w / 2 }, box.geometry)
+            else if (op.mode === 'top') setTransform(box.target.element, { y: minY }, box.geometry)
+            else if (op.mode === 'bottom') setTransform(box.target.element, { y: maxY - box.geometry.h }, box.geometry)
+            else if (op.mode === 'vcenter') setTransform(box.target.element, { y: centerY - box.geometry.h / 2 }, box.geometry)
           }
         }
         for (const target of targets) {
@@ -959,14 +1043,21 @@ export function applyPatch(buffer, deck, filePath, rawPatch, options = {}) {
         const spTree = spTreeOf(target.root)
         if (spTree === undefined) throw new PatchError('badRequest', 'slide has no p:spTree')
         const copy = cloneElement(target.element)
-        const cNvPr = findFirst(copy, 'p:cNvPr')
-        if (cNvPr !== undefined) {
-          setAttr(cNvPr, 'id', String(nextShapeId(spTree)))
-          const name = getAttr(cNvPr, 'name')
-          setAttr(cNvPr, 'name', name === undefined ? 'Copy' : `${name} 副本`)
+        // **必须给复制体里每一个 cNvPr 换新 id**，不只是顶层那个。
+        // 组合（p:grpSp）内部有子形状，只改外层会让子形状 id 与原组合重复，
+        // PowerPoint 打开时提示"修复"，我们自己 elementById/locate 也会命中错对象。
+        const copyIds = findAll(copy, 'p:cNvPr')
+        let firstAssigned = null
+        for (const node of copyIds) {
+          const assigned = String(nextShapeId(spTree))
+          setAttr(node, 'id', assigned)
+          if (firstAssigned === null) firstAssigned = assigned
+          const name = getAttr(node, 'name')
+          setAttr(node, 'name', name === undefined ? 'Copy' : `${name} 副本`)
         }
-        const geometry = geometryOf(target.element)
-        setTransform(copy, { x: geometry.x + op.dx, y: geometry.y + op.dy })
+        const cNvPr = copyIds[0]
+        const geometry = baseGeometry(op.id, target.element)
+        setTransform(copy, { x: geometry.x + op.dx, y: geometry.y + op.dy }, geometry)
         // 插到原元素之后（即紧邻其上方的绘制层）。
         const sibling = target.parent.children[target.parent.children.indexOf(target.element) + 1]
         insertBefore(target.parent, copy, sibling)
