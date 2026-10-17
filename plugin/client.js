@@ -52,7 +52,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
     const listSessionIds = typeof options.listSessionIds === 'function' ? options.listSessionIds : null
     // 把连接的会话归入工作区，让它在左侧列表里和普通对话一样出现。
     const attachToWorkspace = typeof options.attachToWorkspace === 'function' ? options.attachToWorkspace : null
-    // AI 思考过程与回复：订阅已连接会话的事件流（client.js 里实现）。
+    // 对话转播：订阅已连接会话的事件流，把消息按普通对话形式显示（client.js 里实现）。
     const watchAi = typeof options.watchAi === 'function' ? options.watchAi : null
     const aiSnapshot = typeof options.aiSnapshot === 'function' ? options.aiSnapshot : null
     /** 已连接的会话 id（面板状态，存 localStorage 持久化）。 */
@@ -1335,11 +1335,11 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
     }
 
     /**
-     * 最右侧：AI 思考过程与回复。
+     * 最右侧：对话转播（像普通对话一样把会话内容一条条列出来）。
      *
      * 内容来自 `client.js` 的 `watchAi`（订阅已连接会话的事件流）：`state.ai` 里是
-     * `{ thinking, reply, error }`。面板不自己订阅 —— 事件流要 retain 会话，那件事
-     * 在注入层做，界面层只读结果。
+     * `{ messages, thinking, reply, error }`。面板不自己订阅 —— 事件流要 retain 会话，
+     * 那件事在注入层做，界面层只读结果。
      */
     /** 一条对话消息（用户 / 助手）。工具调用只保留一行摘要，不抢占正文。 */
     function renderChatMessage(message, index) {
@@ -3114,7 +3114,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
     const sessionDiagnostics = () => diag
 
     /**
-     * AI 的思考过程与回复 —— 从会话事件流里读。
+     * 对话转播 —— 把会话事件流还原成一条条消息（用户 / 助手）。
      *
      * 数据形状（实测自 `dsh-api-session-controller` 的客户端实现）：
      *

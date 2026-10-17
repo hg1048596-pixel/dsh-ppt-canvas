@@ -138,7 +138,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
     const sessionDiagnostics = () => diag
 
     /**
-     * AI 的思考过程与回复 —— 从会话事件流里读。
+     * 对话转播 —— 把会话事件流还原成一条条消息（用户 / 助手）。
      *
      * 数据形状（实测自 `dsh-api-session-controller` 的客户端实现）：
      *
