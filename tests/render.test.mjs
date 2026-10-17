@@ -227,4 +227,10 @@ if (failures.length > 0) {
   for (const failure of failures) console.log(`  - ${failure}`)
   process.exit(1)
 }
+// 退出码 2 = 「有测试被跳过」：汇总器据此判定**不是全绿**。
+// 以前这里直接 exit(0)，没装 LibreOffice 的机器上会显示 OK（假绿）。
+if (skipped > 0) {
+  console.log('（跳过视为不完全通过：退出码 2；汇总器会显示 SKIP）')
+  process.exit(2)
+}
 process.exit(0)

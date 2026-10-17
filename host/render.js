@@ -31,6 +31,8 @@ const SOFFICE_CANDIDATES = [
 
 /** 找到 soffice；找不到返回 null（调用方据此退回 DOM 渲染）。 */
 export function findSoffice() {
+  // 测试钩子：模拟「本机没装 LibreOffice」，用来验证「跳过不能被算作全绿」这条闸门。
+  if (process.env.DSH_PPT_HIDE_LIBREOFFICE === '1') return null
   for (const candidate of SOFFICE_CANDIDATES) {
     try {
       if (existsSync(candidate)) return candidate
