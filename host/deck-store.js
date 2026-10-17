@@ -57,6 +57,29 @@ export class DeckStore {
     this.current = null
     /** @type {Map<string, {payload: object, createdAt: number, consumed: boolean}>} */
     this.contexts = new Map()
+    /**
+     * 写操作串行化队列。
+     *
+     * 为什么必须串行：apply 的流程是「读 open.buffer → 计算 → await 写盘 → 更新 open」。
+     * 两个 apply 并发时都会基于**同一份旧 buffer** 计算，后写的那次会把先写的改动
+     * 整体覆盖（lost update），而且历史里会出现两条相同 rev 的记录。
+     * 触发场景：AI 工具调用与客户端提交撞在一起、或两个面板同时编辑。
+     */
+    this.mutationTail = Promise.resolve()
+  }
+
+  /**
+   * 把一次写操作排进队列，保证同一时刻只有一个在跑。
+   * 前一个失败不会断链（用 `then(ok, err)` 接住两种结果）。
+   *
+   * @template T
+   * @param {() => Promise<T>} run
+   * @returns {Promise<T>}
+   */
+  enqueueMutation(run) {
+    const result = this.mutationTail.then(run, run)
+    this.mutationTail = result.then(() => undefined, () => undefined)
+    return result
   }
 
   // ---------------------------------------------------------------- 打开 / 读取
@@ -155,7 +178,52 @@ export class DeckStore {
     if (open === null || open === undefined) throw new DeckError('noDeck', 'no presentation is open')
     const deck = open.deck
     deck.rev = open.rev
+    // 让客户端能廉价地判断「磁盘上的文件是否被外部程序改过」：
+    // 它拿这个值和 /api/status 的 fileMtimeMs 对比即可，不必每次都重解析整包。
+    deck.fileMtimeMs = open.mtimeMs
     return deck
+  }
+
+  /**
+   * 轻量状态：只读 stat，不解析包。供客户端轮询外部改动用。
+   *
+   * 为什么需要单独的接口：`/api/deck` 返回整份 Deck（大文档几百 KB JSON），
+   * 4 秒一次轮询不划算；而外部改动检测只需要 rev + mtime。
+   *
+   * @returns {{file: string, rev: number, mtimeMs: number, changed: boolean}}
+   */
+  status() {
+    const open = this.requireCurrent()
+    const onDisk = safeMtime(open.filePath)
+    return {
+      file: open.filePath,
+      rev: open.rev,
+      mtimeMs: onDisk,
+      openedMtimeMs: open.mtimeMs,
+      // 磁盘 mtime 与打开时记录的不一致 = 外部改过（保存过 / 被替换）
+      changed: onDisk !== 0 && open.mtimeMs !== 0 && onDisk !== open.mtimeMs,
+    }
+  }
+
+  /**
+   * 写入前的护栏：文件是否已被外部程序改动。
+   *
+   * **不校验会静默丢数据**：apply 用的是内存里的 buffer，若 PowerPoint 在此期间
+   * 保存过文件，我们的写入会覆盖掉外部修改（且撤销快照 before 也是旧的）。
+   * 实测（tools/probe-external-edit.mjs）：外部覆盖后 /api/deck 仍返回旧内容。
+   *
+   * @param {object} open
+   * @throws {DeckError} code=staleFile
+   */
+  assertUnchangedOnDisk(open) {
+    const onDisk = safeMtime(open.filePath)
+    if (onDisk === 0 || open.mtimeMs === 0) return // 拿不到 mtime 时不阻断
+    if (onDisk === open.mtimeMs) return
+    throw new DeckError(
+      'staleFile',
+      '文件已被其他程序修改（例如 PowerPoint 保存过），为避免覆盖那部分改动，本次写入已中止。请先重载。',
+      { file: open.filePath, openedMtimeMs: open.mtimeMs, currentMtimeMs: onDisk },
+    )
   }
 
   /** 当前打开文档的内部句柄（含 buffer），仅供 API/工具层使用。 */
@@ -180,6 +248,11 @@ export class DeckStore {
    * @param {{dryRun?: boolean, source?: string, requestId?: string}} options
    */
   async apply(patch, options = {}) {
+    return this.enqueueMutation(() => this.applyUnlocked(patch, options))
+  }
+
+  /** apply 的实际实现；只应由 enqueueMutation 调用（保证串行）。 */
+  async applyUnlocked(patch, options = {}) {
     const open = this.requireCurrent()
     if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
       throw new DeckError('badRequest', 'patch must be an object')
@@ -226,6 +299,8 @@ export class DeckStore {
 
     const rev = open.rev + 1
     const nextBuffer = Buffer.from(result.buffer)
+    // 落盘前确认磁盘上的文件没被外部程序改过（否则会静默覆盖别人的修改）。
+    if (options.force !== true) this.assertUnchangedOnDisk(open)
     await writeAtomic(open.filePath, nextBuffer)
     this.history.push({
       filePath: open.filePath,
@@ -258,12 +333,12 @@ export class DeckStore {
 
   /** 撤销 steps 步。 */
   async undo(steps = 1) {
-    return this.#restore('undo', steps)
+    return this.enqueueMutation(() => this.#restore('undo', steps))
   }
 
   /** 重做 steps 步。 */
   async redo(steps = 1) {
-    return this.#restore('redo', steps)
+    return this.enqueueMutation(() => this.#restore('redo', steps))
   }
 
   async #restore(direction, steps) {
@@ -280,6 +355,8 @@ export class DeckStore {
       )
     }
     const buffer = Buffer.from(outcome.buffer)
+    // 撤销/重做同样会写盘，同样不能覆盖外部修改。
+    this.assertUnchangedOnDisk(open)
     await writeAtomic(open.filePath, buffer)
     open.buffer = buffer
     open.mtimeMs = safeMtime(open.filePath)

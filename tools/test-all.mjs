@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SUITES = [
   { name: 'engine', args: [join(ROOT, 'tests', 'engine.test.mjs')] },
+  { name: 'concurrency', args: [join(ROOT, 'tests', 'concurrency.test.mjs')] },
   { name: 'api', args: [join(ROOT, 'tests', 'api.test.mjs')] },
   { name: 'client', args: [join(ROOT, 'tests', 'client-harness.mjs')] },
   { name: 'css', args: [join(ROOT, 'tests', 'css.test.mjs')] },

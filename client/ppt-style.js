@@ -70,7 +70,14 @@ const CSS = `
 .dsh-ppt-sessionbadge.is-ok{color:var(--dsw-alias-state-success-primary,#1f9d55);border-color:currentColor;}
 
 /* ---------------- 主体 ---------------- */
-.dsh-ppt-body{display:flex;flex:1;min-height:0;}
+/* 顶部错误条：失败原因常驻可见（不是 6 秒就消失的 toast） */
+.dsh-ppt-errorbar{display:flex;align-items:flex-start;gap:8px;padding:7px 10px;flex:none;
+  background:rgba(217,48,37,.1);border-bottom:1px solid rgba(217,48,37,.3);
+  color:var(--dsw-alias-state-error-primary,#d93025);font-size:12px;line-height:1.5;}
+.dsh-ppt-errorbar-text{flex:1;min-width:0;word-break:break-word;white-space:pre-wrap;}
+.dsh-ppt-errorbar-x{border:0;background:transparent;color:inherit;cursor:pointer;
+  font-size:15px;line-height:1;padding:0 4px;border-radius:4px;}
+.dsh-ppt-errorbar-x:hover{background:rgba(217,48,37,.18);}.dsh-ppt-body{display:flex;flex:1;min-height:0;}
 .dsh-ppt-thumbs{width:168px;flex:none;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px;
   border-right:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));}
 .dsh-ppt-thumb{position:relative;border:1px solid transparent;background:transparent;padding:0;border-radius:8px;cursor:pointer;text-align:left;}

@@ -255,6 +255,80 @@ check('read: 母版文本默认值真的被读取（回归：曾定义了函数�
   }
 })
 
+check('read: 带 <p:ph> 占位符的真实 PPTX 必须能读（回归：曾对 placeholder 对象调 .includes 崩溃）', () => {
+  // 真实 PowerPoint 文件的标题/正文都是占位符（<p:ph type="title"/>），
+  // 而 classifySp 把 placeholder 读成 `{ idx, type }` **对象**。
+  // 曾经这里写成 `(placeholder ?? '').includes('title')` → 对对象调 .includes 抛 TypeError
+  // → readDeck 整页失败 → /api/open 返回 500，**所有正常 PPTX 都打不开**。
+  // 仓库 fixture 全是纯 TextBox 且没有 <p:ph>，所以这条必须自己造。
+  const entries = readZipEntries(readFileSync(FIXTURE))
+  const slideEntry = entries.find(entry => entry.name === 'ppt/slides/slide1.xml')
+  const root = parseXml(Buffer.from(slideEntry.data).toString('utf8'))
+
+  // 找一个有文字的形状，给它塞一个占位符标记
+  const sp = findAll(root, 'p:sp').find(node => findAll(node, 'a:t').some(t => textOf(t).trim() !== ''))
+  assert(sp !== undefined, 'fixture 里应有带文字的形状')
+  const nvSpPr = findFirst(sp, 'p:nvSpPr')
+  assert(nvSpPr !== undefined, '形状应有 p:nvSpPr')
+  let nvPr = findFirst(nvSpPr, 'p:nvPr')
+  if (nvPr === undefined) {
+    nvPr = createElement('p:nvPr')
+    appendChild(nvSpPr, nvPr)
+  }
+  const ph = createElement('p:ph')
+  setAttr(ph, 'type', 'title')
+  setAttr(ph, 'idx', '1')
+  appendChild(nvPr, ph)
+
+  const injected = writeZip(entries.map(entry => ({
+    name: entry.name,
+    data: entry.name === 'ppt/slides/slide1.xml' ? Buffer.from(serializeXml(root)) : entry.data,
+  })))
+
+  // 关键：这一步以前会抛 TypeError
+  const deck = readDeck(injected, deckPath, 0)
+  assert(deck.slides.length === 3, `占位符文件应当正常读出（got ${deck.slides.length} 页）`)
+
+  const withPlaceholder = deck.slides[0].shapes.find(shape => shape.placeholder !== null && shape.placeholder !== undefined)
+  assert(withPlaceholder !== undefined, '占位符应当被记录到模型里')
+  assertEqual(withPlaceholder.placeholder.type, 'title', 'placeholder.type 应保留原始 OOXML 值')
+  assertEqual(withPlaceholder.placeholder.idx, '1')
+})
+
+check('read: 占位符标题走 titleStyle、正文走 bodyStyle（母版继承分流正确）', () => {
+  // 同上造一个带 ph 的文件，但确认取的是**不同**的母版默认值分支。
+  // fixture 的母版 titleStyle 与 bodyStyle 的 lnSpc 不同，可以用它区分。
+  const entries = readZipEntries(readFileSync(FIXTURE))
+  const slideEntry = entries.find(entry => entry.name === 'ppt/slides/slide1.xml')
+  const root = parseXml(Buffer.from(slideEntry.data).toString('utf8'))
+  const sps = findAll(root, 'p:sp').filter(node => findAll(node, 'a:t').some(t => textOf(t).trim() !== ''))
+  assert(sps.length >= 2, '需要至少两个带文字的形状')
+  const marks = ['title', 'body']
+  for (let index = 0; index < 2; index += 1) {
+    const nvSpPr = findFirst(sps[index], 'p:nvSpPr')
+    let nvPr = findFirst(nvSpPr, 'p:nvPr')
+    if (nvPr === undefined) { nvPr = createElement('p:nvPr'); appendChild(nvSpPr, nvPr) }
+    const ph = createElement('p:ph')
+    setAttr(ph, 'type', marks[index])
+    appendChild(nvPr, ph)
+  }
+  const injected = writeZip(entries.map(entry => ({
+    name: entry.name,
+    data: entry.name === 'ppt/slides/slide1.xml' ? Buffer.from(serializeXml(root)) : entry.data,
+  })))
+  const deck = readDeck(injected, deckPath, 0)
+  const titled = deck.slides[0].shapes.filter(shape => shape.placeholder !== null && shape.placeholder !== undefined)
+  assertEqual(titled.length, 2, '两个占位符都应保留')
+  // 两个形状的段落样式必须能正常读出（lnSpc 有限正数或 null），不能是 NaN/异常
+  for (const shape of titled) {
+    for (const paragraph of shape.text.paragraphs) {
+      if (paragraph.lnSpc === null) continue
+      assert(Number.isFinite(paragraph.lnSpc) && paragraph.lnSpc > 0 && paragraph.lnSpc < 5,
+        `占位符段落的 lnSpc 异常：${paragraph.lnSpc}`)
+    }
+  }
+})
+
 // ---------------------------------------------------------------- 补丁
 
 check('patch: 混合补丁应用后回读一致', () => {

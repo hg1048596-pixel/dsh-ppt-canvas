@@ -65,27 +65,15 @@ function createPptApp(options) {
    */
   async function connectNewSession() {
     if (selectSession === null) return { ok: false, message: '宿主没有提供会话来源。' }
-    const before = new Set(Array.isArray(sessionIdRef.latest) ? sessionIdRef.latest : [])
+    // selectSession() 是同步的：宿主只会在「真实会话列表」里挑一个返回 id，
+    // 不会「先说要新建、稍后才给 id」。所以不需要轮询等新 id（那段是死代码，已删）。
     const created = selectSession()
     if (created === null || created.ok !== true) {
       return { ok: false, message: created?.error?.message ?? '未知原因' }
     }
-    let picked = typeof created.sessionId === 'string' ? created.sessionId : ''
-    for (let attempt = 0; attempt < 15 && picked === ''; attempt += 1) {
-      await new Promise(resolve => { timeout(resolve, 200) })
-      const now = Array.isArray(sessionIdRef.latest) ? sessionIdRef.latest : []
-      const fresh = now.filter(id => !before.has(id))
-      picked = fresh.length > 0 ? fresh[fresh.length - 1] : ''
-    }
+    const picked = typeof created.sessionId === 'string' ? created.sessionId : ''
     if (picked === '') {
-      // 把「哪条路成功、以及为什么没给 id」一并报出来 —— 否则同样的提示无法定位。
-      const detail = Array.isArray(created.tried) && created.tried.length > 0
-        ? `；尝试过：${created.tried.join('；')}`
-        : ''
-      return {
-        ok: false,
-        message: `宿主没有返回会话 id（成功的是 ${created.via ?? '未知入口'}${detail}）`,
-      }
+      return { ok: false, message: '宿主没有返回会话 id' }
     }
     sessionIdRef.current = picked
     return { ok: true, sessionId: picked }
@@ -227,6 +215,7 @@ function createPptApp(options) {
     notFound: '找不到文件或对象',
     validationFailed: 'AI 给的修改方案没通过校验',
     staleRev: '文档在指令发出后被改动过，请重新发送',
+    staleFile: '文件已被其他程序（如 PowerPoint）保存过，为免覆盖已中止写入；已自动重载，请重试',
     ioFailed: '文件读写失败（可能被 PowerPoint 占用）',
     nothingToUndo: '没有可撤销的步骤',
     nothingToRedo: '没有可重做的步骤',
@@ -359,6 +348,8 @@ function createPptApp(options) {
       // 点击点（幻灯片坐标），用于把光标放到用户点的行上（原生 PPT 手感）。
       editingId: null,
       editCaret: null,
+      // 已就「磁盘文件被外部改过」提示过用户一次（避免每次轮询都弹）
+      externalChangeWarned: false,
       instruction: '',
       sending: false,
       pendingRequestId: null,
@@ -516,18 +507,20 @@ function createPptApp(options) {
       }
       const candidates = mediaUrlCandidates(shape.image.url)
       if (candidates.length > 0) {
-        // 自愈：第一条通道失败就换下一条（路径在 src 里用空格分隔，onError 时右移一位）。
+        // 自愈：先请求首个候选；失败时按 data-rest 队列前进。
+        // 注意 src 必须是**单个合法 URL** —— 曾经写成 candidates.join(' ')，那是非法 URL，
+        // 导致首个候选永远不被请求（缩略图/内置渲染里的图片全裂）。
         children.push(h('img', {
           key: 'img',
-          src: candidates.join(' '),
+          src: candidates[0],
+          'data-rest': candidates.slice(1).join(' '),
           style: inner,
           alt: shape.name,
           draggable: false,
           onError: (event) => {
             const node = event?.currentTarget ?? event?.target
             if (node === null || node === undefined) return
-            const rest = String(node.getAttribute('data-rest') ?? '').split(' ').filter(Boolean)
-            const queue = rest.length > 0 ? rest : candidates.slice(1)
+            const queue = String(node.getAttribute('data-rest') ?? '').split(' ').filter(Boolean)
             if (queue.length === 0) return
             node.setAttribute('data-rest', queue.slice(1).join(' '))
             node.src = queue[0]
@@ -1507,7 +1500,7 @@ function createPptApp(options) {
   // ------------------------------------------------------------------ 顶栏
 
   function Header(props) {
-    const { store, state, deck, actions, titleBar } = props
+    const { store, state, deck, actions, titleBar, logOp } = props
     // 会话相关的值**必须**在这里重新推导，不能引用 Panel 里的局部变量：
     // Header 是独立组件，Panel 的局部名在它里面是未声明的自由变量 ——
     // 这正是「点会话按钮整页白屏」的原因（渲染到菜单那段时抛 ReferenceError）。
@@ -1922,7 +1915,7 @@ function createPptApp(options) {
   }
 
   function FloatingPanel(props) {
-    const { store, openPanel, titleBar, geometry } = props
+    const { store, openPanel, titleBar, geometry, sessionIds, workspaceId, logOp } = props
     const state = useStore(store)
     const geo = geometry ?? { load: () => null, save: () => {}, initial: { width: 1180, height: 760 } }
 
@@ -2044,6 +2037,10 @@ function createPptApp(options) {
       h(PanelErrorBoundary, null,
         h(Panel, {
           store,
+          // sessionIds / workspaceId 由 client.js 传入；漏传会让会话菜单恒为空。
+          sessionIds,
+          workspaceId,
+          logOp,
           titleBar: titleBar === undefined
             ? { draggable: true, onPointerDown: onTitlePointerDown, onClose: () => store.set({ open: false }) }
             : { ...titleBar, draggable: true, onPointerDown: onTitlePointerDown },
@@ -2174,6 +2171,8 @@ function createPptApp(options) {
 
     const actionsRef = React.useRef({})
     const pendingRef = React.useRef({ requestId: null, baseRev: 0, changedIds: [] })
+    /** 等待令牌：用户点「停止等待」时自增，正在跑的 waitForAi 会自行退出。 */
+    const aiWaitTokenRef = React.useRef(0)
 
     const adoptAiResult = React.useCallback((next) => {
       adoptDeck(next)
@@ -2182,31 +2181,36 @@ function createPptApp(options) {
       pendingRef.current = { requestId: null, baseRev: 0, changedIds: [] }
     }, [adoptDeck, highlightChanged])
 
+    /**
+     * 等待 AI 把改动落盘。
+     *
+     * 判据只有一个：**rev 有没有推进**（AI 是否调了 ppt_canvas_apply）。
+     * 曾经这里想用「会话 running 信号」，但拿不到，写成 `let running = false` 之后
+     * 那个 `break` 永远不可达 —— 于是每次发送都把 UI 锁满 150 秒（按钮全灰）。
+     * 现在改成轮询轻量的 /api/status，rev 一推进就立刻结束。
+     */
     const waitForAi = React.useCallback(async (requestId, baseRev) => {
-      const deadline = Date.now() + 150000
-      let sawRunning = false
-      let idleTicks = 0
+      const deadline = Date.now() + 120000
+      const waitToken = ++aiWaitTokenRef.current
+      let advanced = false
       while (Date.now() < deadline) {
-        // 不再依赖「会话 running」信号：AI 是否改了文档，直接看 rev 有没有推进
-        // （下面按 rev 判定），所以这里不需要额外的会话状态探测。
-        let running = false
-        if (running) {
-          sawRunning = true
-          idleTicks = 0
-        } else if (sawRunning) {
-          idleTicks += 1
-          if (idleTicks >= 2) break
-        }
-        await new Promise(resolve => { timeout(resolve, 1000) })
+        await new Promise(resolve => { timeout(resolve, 700) })
+        if (aiWaitTokenRef.current !== waitToken) return // 被取消（用户点了停止）
+        let probe
+        try {
+          probe = await callApi('status')
+          store.set({ aiWait: { baseRev, currentRev: probe.rev, at: Date.now() } })
+        } catch { continue }
+        if (probe.rev > baseRev) { advanced = true; break }
       }
       try {
         const status = await callApi('history')
         store.set({ history: status })
-        if (status.rev > baseRev) {
+        if (advanced || status.rev > baseRev) {
           const next = await callApi('deck', {})
           adoptAiResult(next)
           logOp(`AI 已应用修改：rev ${baseRev} → ${status.rev}`, 'ok')
-          toast('AI 已应用修改', { kind: 'ok', detail: `文档已更新到 rev ${status.rev}，改动元素已高亮。` })
+          toast('AI 已应用修改', { kind: 'ok', detail: `文档已更新到 rev ${status.rev}。` })
         } else {
           logOp('AI 未产生文档改动', 'warn')
           toast('AI 没有返回修改方案', {
@@ -2218,7 +2222,7 @@ function createPptApp(options) {
       } catch (error) {
         toast('刷新失败', { kind: 'error', detail: describeError(error) })
       } finally {
-        store.set({ sending: false, pendingRequestId: null })
+        if (aiWaitTokenRef.current === waitToken) store.set({ sending: false, pendingRequestId: null })
       }
     }, [adoptAiResult, logOp, store, toast])
 
@@ -2375,6 +2379,10 @@ function createPptApp(options) {
           toast('连接会话失败', { kind: 'error', detail: result.message })
           return
         }
+        // **必须写进 store**：Panel 每次渲染都会用 state.sessionId 覆盖 sessionIdRef.current，
+        // 只改 ref 不写 store 的话，下一帧就被重置回 ''，界面永远显示「未连接」。
+        store.set({ sessionId: result.sessionId })
+        savePrefs({ sessionId: result.sessionId })
         logOp(`已连接会话 ${result.sessionId}`, 'ok')
       },
 
@@ -2496,15 +2504,44 @@ function createPptApp(options) {
 
     React.useEffect(() => { void refreshHistory() }, [refreshHistory])
 
-    // 外部改动（另一处面板 / PowerPoint / AI 工具）时自动重载：rev 变了就刷新。
+    // 外部改动检测：分两种来源，处理方式不同。
+    //
+    //  1. **磁盘被外部程序改过**（PowerPoint 保存过）—— 必须重载，否则下一次写入
+    //     会基于旧 buffer 覆盖掉别人的修改（宿主侧 apply 现在会以 staleFile 拒绝，
+    //     但更早发现更好）。判据是 mtime，不是 rev：外部保存不会动宿主的 rev。
+    //  2. **rev 变了**（另一处面板 / AI 工具调过了）—— 直接取内存视图刷新即可。
     React.useEffect(() => {
       let stopped = false
       const tick = async () => {
         if (stopped) return
-        if (store.get().deck === null || store.get().sending) return
+        const snapshot = store.get()
+        if (snapshot.deck === null || snapshot.sending) return
         try {
-          const status = await callApi('history')
-          if (!stopped && status.rev !== store.get().deck.rev) {
+          const status = await callApi('status')
+          if (stopped) return
+
+          if (status.changed === true) {
+            // 就地编辑中不抢画面：只提示一次，等编辑结束再处理。
+            if (snapshot.editingId !== null && snapshot.editingId !== undefined) {
+              if (snapshot.externalChangeWarned !== true) {
+                store.set({ externalChangeWarned: true })
+                toast('文件已被其他程序修改', {
+                  kind: 'warn',
+                  detail: '完成当前编辑后会自动重载。注意：若同时还在 PowerPoint 里改，双方可能互相覆盖。',
+                })
+              }
+              return
+            }
+            const next = await callApi('deck', { force: true })
+            if (!stopped) {
+              adoptDeck(next)
+              store.set({ externalChangeWarned: false })
+              logOp('检测到外部改动（文件被其他程序保存过），已自动重载', 'ok')
+            }
+            return
+          }
+
+          if (status.rev !== snapshot.deck.rev) {
             const next = await callApi('deck', {})
             if (!stopped) {
               adoptDeck(next)
@@ -2517,7 +2554,7 @@ function createPptApp(options) {
         ? (() => { const handle = setInterval(tick, 4000); return () => clearInterval(handle) })()
         : options.interval(tick, 4000)
       return () => { stopped = true; dispose() }
-    }, [adoptDeck, logOp, store])
+    }, [adoptDeck, logOp, store, toast])
 
     // 拖拽打开：整块面板/窗口都是投放目标。
     const onDragEnter = React.useCallback((event) => {
@@ -2578,7 +2615,25 @@ function createPptApp(options) {
 
     const shellClass = 'dsh-ppt-panel'
     return h('div', { className: shellClass, ...dropProps },
-      h(Header, { store, state, deck, actions, titleBar, sessionIds: availableSessions }),
+      h(Header, {
+        store, state, deck, actions, titleBar,
+        sessionIds: availableSessions,
+        // Header 里点会话条目会写日志；logOp 定义在 Panel 内，必须显式传下去
+        // （历史上就是漏传导致点击即 ReferenceError）。
+        logOp,
+      }),
+      // 失败原因必须可见：state.error 以前只写不读，用户只能看到 6 秒 toast，
+      // 之后就无法知道刚才为什么失败（项目硬性要求：不允许静默）。
+      state.error !== null && state.error !== undefined && state.error !== ''
+        ? h('div', { className: 'dsh-ppt-errorbar', role: 'alert' },
+            h('span', { className: 'dsh-ppt-errorbar-text' }, state.error),
+            h('button', {
+              className: 'dsh-ppt-errorbar-x',
+              title: '关闭',
+              onClick: () => store.set({ error: null }),
+            }, '×'),
+          )
+        : null,
       h('div', { className: 'dsh-ppt-body' },
         state.showThumbs && deck !== null ? h(ThumbRail, { store, deck, state }) : null,
         h('div', { className: 'dsh-ppt-center' },

@@ -751,7 +751,13 @@ function readShape(container, context) {
     const txBody = childOf(container, 'p:txBody')
     // 排版默认值来自母版：标题走 titleStyle，其余走 bodyStyle。
     // 实测用户的文件里 lnSpc=0.9 与 spcBef=10pt **只在母版**，读不到就会行距错、文字挤。
-    const masterDefaults = classified.kind === 'title' || (classified.placeholder ?? '').includes('title')
+    //
+    // 注意：`placeholder` 是 `{ idx, type }` **对象**（见 classifySp），不是字符串。
+    // 曾经写成 `(classified.placeholder ?? '').includes('title')` —— 对对象调 .includes
+    // 直接抛 TypeError，导致**所有带 `<p:ph>` 占位符的正常 PPTX 都打不开**（500 ioFailed）。
+    // 仓库里的 fixture 全是纯 TextBox、没有 `<p:ph>`，所以测试没拦住。
+    const placeholderType = String(classified.placeholder?.type ?? '')
+    const masterDefaults = classified.kind === 'title' || placeholderType.includes('title')
       ? context.masterText?.title
       : context.masterText?.body
     const text = readTextBody(txBody, theme, masterDefaults)

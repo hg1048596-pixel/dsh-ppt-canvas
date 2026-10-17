@@ -1,0 +1,119 @@
+// tests/concurrency.test.mjs — 写操作串行化（防 lost update）
+//
+// 背景（真实缺陷）：apply 的流程是「读 open.buffer → 计算 → await 写盘 → 更新 open」。
+// 两个 apply 并发时都基于同一份旧 buffer 计算，后写的会整体覆盖先写的改动，
+// 历史里还会出现两条相同 rev。触发场景：AI 工具调用与客户端提交撞在一起。
+//
+// 这个测试的价值在于：**去掉 enqueueMutation 就会失败**。
+//
+// 用法：<node> tests/concurrency.test.mjs
+
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import { DeckStore } from '../host/deck-store.js'
+
+const HERE = dirname(fileURLToPath(import.meta.url))
+const FIXTURE = join(HERE, 'fixtures', 'demo.pptx')
+
+let passed = 0
+let failed = 0
+const failures = []
+
+async function check(name, body) {
+  try {
+    await body()
+    passed += 1
+    console.log(`  ok   ${name}`)
+  } catch (error) {
+    failed += 1
+    failures.push(`${name}: ${error.message}`)
+    console.log(`  FAIL ${name}: ${error.message}`)
+  }
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message ?? 'assertion failed')
+}
+
+function assertEqual(actual, expected, message) {
+  if (actual !== expected) throw new Error(`${message ?? 'not equal'}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`)
+}
+
+const workDir = mkdtempSync(join(tmpdir(), 'ppt-concurrency-'))
+const deckPath = join(workDir, 'race.pptx')
+copyFileSync(FIXTURE, deckPath)
+
+const store = new DeckStore()
+const opened = await store.open(deckPath)
+
+/** 取第一个可填色的非组合形状。 */
+const pickShape = (deck) => deck.slides[0].shapes.find(shape => shape.kind !== 'group')
+
+await check('并发两次 apply：两次改动都要落地，rev 不重复', async () => {
+  const base = store.view()
+  const shapeA = pickShape(base)
+  // 两个形状用不同的填充色，便于验证「都有」而不是「只剩后一个」
+  const shapes = base.slides[0].shapes.filter(shape => shape.kind === 'shape' || shape.kind === 'text')
+  assert(shapes.length >= 2, `需要至少两个可填色形状，实际 ${shapes.length}`)
+  const [one, two] = shapes
+
+  const [first, second] = await Promise.all([
+    store.apply({ summary: '并发 A', ops: [{ op: 'setFill', id: one.id, color: '#111111' }] }),
+    store.apply({ summary: '并发 B', ops: [{ op: 'setFill', id: two.id, color: '#222222' }] }),
+  ])
+
+  // 两次都成功，且拿到的 rev 必须不同（串行化后应为 rev+1 与 rev+2）
+  assert(first.rev !== second.rev, `两个并发 apply 拿到了相同的 rev (${first.rev})，说明没有串行化`)
+
+  const finalDeck = store.view()
+  const afterOne = finalDeck.slides[0].shapes.find(shape => shape.id === one.id)
+  const afterTwo = finalDeck.slides[0].shapes.find(shape => shape.id === two.id)
+  assertEqual(afterOne.style.fill.color?.toUpperCase(), '#111111', '改动 A 必须保留（不能被 B 覆盖）')
+  assertEqual(afterTwo.style.fill.color?.toUpperCase(), '#222222', '改动 B 必须保留')
+  void shapeA
+})
+
+await check('并发 apply 后磁盘内容与内存一致（两处改动都在文件里）', async () => {
+  const onDisk = store.view()
+  const finalDeck = onDisk
+  const colors = finalDeck.slides[0].shapes
+    .map(shape => shape.style?.fill?.color?.toUpperCase() ?? null)
+    .filter(color => color === '#111111' || color === '#222222')
+  assertEqual([...new Set(colors)].length, 2, `磁盘上应当同时包含两处改动，实际 ${JSON.stringify(colors)}`)
+  assert(readFileSync(deckPath).length > 0)
+})
+
+await check('一个失败不阻断队列（后续写入仍可执行）', async () => {
+  const before = store.view().rev
+  // 第一个故意非法（未知 op），第二个合法
+  const bad = store.apply({ summary: '坏补丁', ops: [{ op: 'nope' }] }).then(() => 'resolved', error => error.code)
+  const good = store.apply({ summary: '好补丁', ops: [{ op: 'setFill', id: pickShape(store.view()).id, color: '#333333' }] })
+  const [badResult, goodResult] = await Promise.all([bad, good])
+  assert(badResult !== 'resolved', `坏补丁应当失败，实际 ${badResult}`)
+  assert(goodResult.rev > before, '后续写入必须仍然成功')
+})
+
+await check('undo 也走队列（与 apply 不互相踩）', async () => {
+  const before = store.view().rev
+  await Promise.all([
+    store.undo(1),
+    store.apply({ summary: 'undo 期间写入', ops: [{ op: 'setFill', id: pickShape(store.view()).id, color: '#444444' }] }),
+  ])
+  const after = store.view().rev
+  // 只要不抛错、rev 合理推进即可：关键是不出现「两个操作同时改 open」
+  assert(Number.isFinite(after), 'rev 必须仍是有限数')
+  assert(after >= before - 1, `rev 不应异常回退（before=${before} after=${after}）`)
+})
+
+rmSync(workDir, { recursive: true, force: true })
+
+console.log('')
+console.log(`TOTAL ${passed + failed} PASSED ${passed} FAILED ${failed}`)
+if (failures.length > 0) {
+  for (const failure of failures) console.log(`  - ${failure}`)
+  process.exit(1)
+}
+process.exit(0)

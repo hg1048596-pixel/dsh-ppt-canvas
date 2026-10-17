@@ -17,6 +17,8 @@
 {
   "file": "C:/path/to/Deck.pptx",   // 绝对路径
   "rev": 7,                          // 单调递增；每次成功写盘 +1
+  "fileMtimeMs": 1791972496787,       // 打开时记录的磁盘 mtime；与 /api/status 的 mtimeMs
+                                      // 不一致 = 文件被外部程序改过（客户端据此自动重载）
   "slideWidth": 960,                 // px
   "slideHeight": 540,
   "openedAt": 1760000000000,
@@ -165,13 +167,18 @@
 ## 6. HTTP API（Host，同源，前缀 `/dsh-ppt`）
 
 所有响应：`{ "ok": true, "value": <T> }` 或 `{ "ok": false, "error": { "code": "...", "message": "...", "details": {...} } }`。
-错误码：`badRequest` / `notFound` / `noDeck` / `validationFailed` / `staleRev` / `ioFailed` / `internal`。
+错误码：`badRequest` / `notFound` / `noDeck` / `validationFailed` / `staleRev` / **`staleFile`** / `ioFailed` / `internal`。
+
+`staleFile`（409）：**磁盘上的文件已被其他程序改过**（例如 PowerPoint 保存过），
+写入被中止以免覆盖那部分修改。客户端应重载后再试（`POST /api/deck {force:true}`）。
+`staleRev`（409）指的是「指令捕获后宿主内存里的 rev 变了」，两者不同。
 
 | method | path | body | value |
 |---|---|---|---|
 | POST | `/dsh-ppt/api/open` | `{ "path": "D:/x.pptx", "createDemo": false }` | `Deck`(§1) |
 | POST | `/dsh-ppt/api/demo` | `{ "dir": "D:/tmp" }`（可省） | `Deck` |
-| POST | `/dsh-ppt/api/deck` | `{}` | `Deck`（重新读取并重新解析） |
+| POST | `/dsh-ppt/api/deck` | `{ "force": true }`（可省；force 才重读磁盘） | `Deck` |
+| GET  | `/dsh-ppt/api/status` | — | `{ file, rev, mtimeMs, openedMtimeMs, changed }` |
 | POST | `/dsh-ppt/api/context` | §3 | `{ "requestId": "...", "context": <原文> }` |
 | GET  | `/dsh-ppt/api/context?requestId=...` | — | `{ "context": <原文>, "consumed": bool }` |
 | POST | `/dsh-ppt/api/apply` | `{ "patch": §5, "dryRun": true, "source": "ai"\|"user", "requestId": "..." }` | `ApplyResult` |

@@ -155,6 +155,19 @@ export function validatePatch(deck, patch) {
             }
           }
         })
+        // setText 只对**本来就有文本体**的元素成立（图片/表格/线条/组合没有 a:txBody）。
+        // 否则写入端会硬造一个 txBody —— 那是非法 OOXML，而且以前还会抛 TypeError 变成 500。
+        if (id !== undefined) {
+          const target = elementById(deck, id)
+          if (target !== undefined && (target.shape.text === null || target.shape.text === undefined)) {
+            violations.push({
+              index,
+              op,
+              field: 'id',
+              message: `element ${id} (${target.shape.kind}) has no text body; setText only works on text-bearing shapes`,
+            })
+          }
+        }
         if (id !== undefined) ops.push({ index, op, id, paragraphs: raw.paragraphs })
         break
       }
@@ -516,6 +529,11 @@ function setTextBody(element, paragraphs) {
   }
   const resolveTemplateRPr = (mappedIndex) => {
     const source = existing.length > 0 ? existing[Math.min(mappedIndex, existing.length - 1)] : undefined
+    // 无旧段落可参照（元素原本没有 p:txBody，setText 现建了一个）：
+    // 没有模板样式可用，直接返回 undefined，由调用方走默认值。
+    // 少了这一行，childOf(undefined, …) 会抛 "Cannot read properties of undefined"，
+    // 让 setText 打在图片/表格/线条/组合上时变成 500 ioFailed。
+    if (source === undefined) return undefined
     const direct = styledRPrOf(source)
     if (direct !== undefined) return direct
     const sourceEnd = childOf(source, 'a:endParaRPr')

@@ -24,6 +24,33 @@ const MAX_BODY_BYTES = 128 * 1024 * 1024
 const REQUEST_LOG = []
 const REQUEST_LOG_LIMIT = 40
 
+/**
+ * 允许的来源：本应用自己的渲染进程，以及任意 loopback 页面。
+ *
+ * 为什么必须**主动拒绝**而不是只省掉 CORS 响应头：省掉响应头只能阻止攻击者
+ * **读到**响应，副作用（比如 apply 真的改了文件）照样发生。实测这条路径可达：
+ * 恶意页面用 `content-type: text/plain` 发「简单请求」不触发预检，Host 头是
+ * 127.0.0.1（通过 isLoopbackRequest），于是 POST 会直接执行。
+ */
+const ORIGIN_PATTERN = /^(dsh-app:\/\/|https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$)/
+
+function isAllowedOrigin(origin) {
+  if (typeof origin !== 'string' || origin === '') return true // 非浏览器调用（curl/测试/工具）
+  return ORIGIN_PATTERN.test(origin)
+}
+
+/**
+ * POST 必须声明 JSON content-type。
+ *
+ * 这条是 CSRF 的第二道闸：带 `application/json` 的跨源请求**一定**触发预检，
+ * 而我们的预检只对允许的来源回 CORS 头，浏览器就会在正式请求前中止它。
+ * 因此「要求 JSON」等价于「强制所有浏览器请求先过预检」。
+ */
+function hasJsonContentType(req) {
+  const value = req.headers['content-type']
+  return typeof value === 'string' && /^application\/json\b/i.test(value)
+}
+
 function recordRequest(req, url, route) {
   REQUEST_LOG.push({
     at: new Date().toISOString(),
@@ -116,6 +143,15 @@ export async function handleRequest(req, res, store, bus, logger) {
       send(res, 403, { ok: false, error: { code: 'badRequest', message: 'loopback requests only' } })
       return
     }
+    // CSRF 第一道闸：来源不在白名单就直接拒（不能只靠「不回 CORS 头」，
+    // 那只能挡读取，挡不住副作用）。
+    if (!isAllowedOrigin(origin)) {
+      send(res, 403, {
+        ok: false,
+        error: { code: 'forbiddenOrigin', message: `origin not allowed: ${origin}` },
+      })
+      return
+    }
 
     if (route.startsWith('/media/')) {
       await serveMedia(req, res, store, route.slice('/media/'.length))
@@ -134,6 +170,14 @@ export async function handleRequest(req, res, store, bus, logger) {
       send(res, 405, { ok: false, error: { code: 'badRequest', message: 'POST required' } })
       return
     }
+    // CSRF 第二道闸：强制 JSON content-type，令所有浏览器跨源请求必须先过预检。
+    if (!hasJsonContentType(req)) {
+      send(res, 415, {
+        ok: false,
+        error: { code: 'badRequest', message: 'POST requires content-type: application/json' },
+      })
+      return
+    }
     const body = await readJsonBody(req)
     const value = await handlePost(name, body, store, bus)
     send(res, 200, { ok: true, value })
@@ -146,6 +190,10 @@ export async function handleRequest(req, res, store, bus, logger) {
 
 async function handleGet(name, url, res, store, bus, logger) {
   switch (name) {
+    case 'status':
+      // 轻量状态：客户端轮询「外部程序是否改过文件」用（只 stat，不解析包）。
+      send(res, 200, { ok: true, value: store.status() })
+      return
     case 'deck':
       send(res, 200, { ok: true, value: store.view() })
       return
@@ -189,7 +237,14 @@ async function handleGet(name, url, res, store, bus, logger) {
       const { renderSlidePng } = await import('./render.js')
       const pkg = loadPackage(new Uint8Array(open.buffer))
       const result = await renderSlidePng({
-        file: open.filePath, entries: pkg.entries, page, width, logger,
+        file: open.filePath,
+        entries: pkg.entries,
+        page,
+        width,
+        // 页号必须按 sldIdLst 的顺序映射到部件名：用户重排过幻灯片后
+        // 文件名与显示页序不一致，按 slide${page}.xml 取会渲染错页。
+        slideParts: pkg.slideParts,
+        logger,
       })
       res.writeHead(200, {
         'content-type': 'image/png',
@@ -355,6 +410,10 @@ const STATUS_BY_CODE = {
   nothingToUndo: 409,
   nothingToRedo: 409,
   staleRev: 409,
+  // 文件被外部程序改过：写入已中止，客户端应提示「重新加载后再试」
+  staleFile: 409,
+  // 来源不在白名单（CSRF 防护）
+  forbiddenOrigin: 403,
   ioFailed: 500,
 }
 

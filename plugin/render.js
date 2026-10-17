@@ -55,15 +55,35 @@ function cacheDir() {
  * 其余部件（版式、母版、主题、媒体）原样保留，所以版式引用依然有效。
  *
  * @param {Map<string, Buffer|Uint8Array>} entries 原始包
- * @param {number} page 1 基页号
- * @returns {Buffer} 新的 pptx 字节
+ * @param {number|string} page 1 基页号，或**直接的部件名**（推荐，见下）
+ * @param {string[]} [slideParts] `sldIdLst` 顺序的部件名；给了就按它把页号映射成部件
+ * @returns {{order: string[], entries: Map<string, Buffer>}} 新包的部件表
  */
-export function promoteSlide(entries, page) {
-  const from = `ppt/slides/slide${page}.xml`
-  const fromRels = `ppt/slides/_rels/slide${page}.xml.rels`
-  const slideXml = entries.get(from)
+export function promoteSlide(entries, page, slideParts) {
+  // 页号 ≠ 文件名！`readDeck` 的页序来自 presentation.xml 的 `sldIdLst`，
+  // 而部件文件名是 `slideN.xml`。用户重排过幻灯片后两者不再一致
+  // （例如 sldIdLst 第 1 项指向 slide2.xml），直接拼 `slide${page}.xml` 会渲染错页。
+  // 所以：能拿到 slideParts 就按它映射；page 直接传部件名也接受。
+  let part
+  if (typeof page === 'string' && page !== '') {
+    part = page
+  } else if (Array.isArray(slideParts) && slideParts.length > 0) {
+    const index = Math.max(0, Math.trunc(Number(page)) - 1)
+    part = slideParts[Math.min(index, slideParts.length - 1)]
+  } else {
+    part = `ppt/slides/slide${page}.xml`
+  }
+  if (typeof part !== 'string' || part === '') {
+    const error = new Error(`cannot resolve slide part for page ${page}`)
+    error.code = 'notFound'
+    throw error
+  }
+  const slash = part.lastIndexOf('/')
+  const base = part.slice(slash + 1)
+  const fromRels = `${part.slice(0, slash)}/_rels/${base}.rels`
+  const slideXml = entries.get(part)
   if (slideXml === undefined) {
-    const error = new Error(`presentation has no ${from}`)
+    const error = new Error(`presentation has no ${part}`)
     error.code = 'notFound'
     throw error
   }
@@ -115,7 +135,7 @@ function runSoffice(soffice, args, timeoutMs) {
  * @param {object} [options.logger]
  * @returns {Promise<{ buffer: Buffer, cached: boolean, ms: number }>}
  */
-export async function renderSlidePng({ file, entries, page, width = 1600, logger }) {
+export async function renderSlidePng({ file, entries, page, width = 1600, slideParts, logger }) {
   const soffice = findSoffice()
   if (soffice === null) {
     const error = new Error('没有找到 LibreOffice，无法做精确渲染')
@@ -141,7 +161,7 @@ export async function renderSlidePng({ file, entries, page, width = 1600, logger
   mkdirSync(profileDir, { recursive: true })
   const profileUri = `file:///${profileDir.replace(/\\/g, '/')}`
 
-  const promoted = promoteSlide(entries, page)
+  const promoted = promoteSlide(entries, page, slideParts)
   const { writeZip } = await import('./zip.js')
   const buffer = writeZip(promoted.order.map(name => ({ name, data: promoted.entries.get(name) })))
   const stagedPath = join(dir, `${key}.pptx`)

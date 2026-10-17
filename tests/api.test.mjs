@@ -6,7 +6,7 @@
 // 这样测的是 HTTP 层 + DeckStore + 引擎的组合，而不是单元级别的假调用。
 
 import { createServer } from 'node:http'
-import { mkdtempSync, copyFileSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, copyFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -101,10 +101,10 @@ const server = createServer(async (req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 const base = `http://127.0.0.1:${server.address().port}/dsh-ppt`
 
-async function api(path, body) {
+async function api(path, body, extraHeaders = {}) {
   const response = await fetch(`${base}/${path}`, body === undefined
-    ? { method: 'GET' }
-    : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    ? { method: 'GET', headers: extraHeaders }
+    : { method: 'POST', headers: { 'content-type': 'application/json', ...extraHeaders }, body: JSON.stringify(body) })
   const payload = await response.json()
   return { status: response.status, payload }
 }
@@ -366,11 +366,103 @@ await step('api: 非 loopback Host 头被拒（DNS rebinding 防护）', async (
   assert(raw.includes('loopback requests only'), 'rejection reason is reported')
 })
 
+// ---- CSRF（跨站请求伪造）----
+// 威胁模型：用户在浏览器里打开一个恶意页面，该页面向 127.0.0.1:19488 发请求。
+// Host 头是 127.0.0.1（只校验 Host 挡不住它），所以必须校验 Origin 与 content-type。
+
+await step('api: 非白名单 Origin 的请求被拒（403 forbiddenOrigin）', async () => {
+  for (const method of ['GET', 'POST']) {
+    const response = await fetch(`${base}/api/apply`, {
+      method,
+      headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
+      ...(method === 'POST' ? { body: JSON.stringify({ patch: { summary: 'x', ops: [] } }) } : {}),
+    })
+    assertEqual(response.status, 403, `${method} 带恶意 Origin 必须被拒`)
+    const payload = await response.json()
+    assertEqual(payload.error.code, 'forbiddenOrigin')
+  }
+})
+
+await step('api: 白名单 Origin（loopback / dsh-app）仍然放行', async () => {
+  for (const origin of ['http://127.0.0.1:19387', 'http://localhost:5173', 'dsh-app://app']) {
+    const { status } = await api('api/status', undefined, { origin })
+    assertEqual(status, 200, `origin ${origin} 应当放行`)
+  }
+})
+
+await step('api: POST 不带 JSON content-type 被拒（415，堵住「简单请求」CSRF）', async () => {
+  // text/plain 是 CORS「简单请求」，不会触发预检 —— 正是攻击者会用的形态。
+  const response = await fetch(`${base}/api/apply`, {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain' },
+    body: JSON.stringify({ patch: { summary: 'x', ops: [] } }),
+  })
+  assertEqual(response.status, 415)
+  const payload = await response.json()
+  assert(payload.error.message.includes('application/json'), '错误信息应说明需要 JSON')
+})
+
 await step('api: 大 body 与坏 JSON 都是 badRequest', async () => {
   const bad = await fetch(`${base}/api/apply`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{oops' })
   assertEqual(bad.status, 400)
   const parsed = await bad.json()
   assertEqual(parsed.error.code, 'badRequest')
+})
+
+// ---- 外部改动检测（数据丢失防护）----
+// 背景：apply 用的是内存里的 buffer。若用户在 PowerPoint 里保存过文件，
+// 我们的写入会覆盖掉那部分改动，而且撤销快照 before 也是旧的（等于丢失）。
+// 实测见 tools/probe-external-edit.mjs。
+
+await step('api: GET status 给出 rev 与磁盘 mtime（changed=false）', async () => {
+  const { status, payload } = await api('api/status')
+  assertEqual(status, 200)
+  assertEqual(payload.ok, true)
+  assert(payload.value.rev >= 0, 'status reports rev')
+  assert(payload.value.mtimeMs > 0, 'status reports the on-disk mtime')
+  assertEqual(payload.value.changed, false, 'nothing has changed on disk yet')
+})
+
+await step('api: 外部改动后写入被拒（staleFile），且不覆盖外部内容', async () => {
+  // 先把文档打开到干净状态
+  const opened = await api('api/open', { path: deckPath })
+  assertEqual(opened.status, 200)
+
+  // 模拟 PowerPoint 在外部保存：换掉磁盘上的字节 + 推进 mtime
+  await new Promise(resolve => setTimeout(resolve, 1100))
+  const external = readFileSync(FIXTURE)
+  writeFileSync(deckPath, external)
+
+  // status 必须能看出「变了」
+  const afterStatus = await api('api/status')
+  assertEqual(afterStatus.payload.value.changed, true, 'status must notice the external change')
+
+  // 此时 apply 必须被拒绝，且**磁盘字节保持外部版本**
+  const bumped = Date.now()
+  const rejected = await api('api/apply', {
+    patch: {
+      summary: '外部改动后的一次写入',
+      ops: [{ op: 'setFill', id: opened.payload.value.slides[0].shapes[0].id, color: '#123456' }],
+    },
+  })
+  assertEqual(rejected.status, 409, `expected 409 staleFile, got ${rejected.status}: ${JSON.stringify(rejected.payload)}`)
+  assertEqual(rejected.payload.error.code, 'staleFile')
+  assert(Buffer.compare(readFileSync(deckPath), external) === 0, '外部内容必须原样保留（不能被覆盖）')
+  void bumped
+})
+
+await step('api: force 重载后可以继续写入', async () => {
+  const reloaded = await api('api/deck', { force: true })
+  assertEqual(reloaded.status, 200)
+  const ok = await api('api/apply', {
+    patch: {
+      summary: '重载后写入',
+      ops: [{ op: 'setFill', id: reloaded.payload.value.slides[0].shapes[0].id, color: '#123456' }],
+    },
+  })
+  assertEqual(ok.status, 200, `重载后应当能写入：${JSON.stringify(ok.payload)}`)
+  const status = await api('api/status')
+  assertEqual(status.payload.value.changed, false, '写入后 mtime 应已同步')
 })
 
 // ---- 收尾 ----

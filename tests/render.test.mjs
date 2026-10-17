@@ -120,6 +120,33 @@ check('render: promoteSlide 页号越界时报 notFound（不写出坏包）', (
   assertEqual(code, 'notFound')
 })
 
+check('render: promoteSlide 按 slideParts 映射页号（重排过的文件不会渲错页）', () => {
+  // 页序来自 presentation.xml 的 sldIdLst，而部件文件名是 slideN.xml。
+  // 用户重排/删除过幻灯片后两者不一致：直拼 slide${page}.xml 会取错部件。
+  const reordered = promoteSlide(demoPkg.entries, 1, ['ppt/slides/slide3.xml', 'ppt/slides/slide1.xml', 'ppt/slides/slide2.xml'])
+  assertEqual(
+    Buffer.compare(Buffer.from(reordered.entries.get('ppt/slides/slide1.xml')), Buffer.from(demoPkg.entries.get('ppt/slides/slide3.xml'))),
+    0,
+    '第 1 页应取 slideParts[0]（此处是 slide3.xml）',
+  )
+
+  // 直接传部件名也应支持
+  const byPart = promoteSlide(demoPkg.entries, 'ppt/slides/slide2.xml')
+  assertEqual(
+    Buffer.compare(Buffer.from(byPart.entries.get('ppt/slides/slide1.xml')), Buffer.from(demoPkg.entries.get('ppt/slides/slide2.xml'))),
+    0,
+    '直接给部件名时应复制那个部件',
+  )
+
+  // 没有 slideParts 时退回按名字取（旧行为，保持兼容）
+  const legacy = promoteSlide(demoPkg.entries, 2)
+  assertEqual(
+    Buffer.compare(Buffer.from(legacy.entries.get('ppt/slides/slide1.xml')), Buffer.from(demoPkg.entries.get('ppt/slides/slide2.xml'))),
+    0,
+    '无 slideParts 时按页号拼文件名',
+  )
+})
+
 check('render: findSoffice 返回存在的路径或 null', () => {
   const found = findSoffice()
   if (found !== null) assert(existsSync(found), `返回的路径必须存在：${found}`)

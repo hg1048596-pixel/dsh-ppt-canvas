@@ -203,10 +203,24 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       if (promptSessions === undefined || typeof promptSessions.retain !== 'function') return () => {}
       if (typeof sessionId !== 'string' || sessionId === '') return () => {}
       let reference
-      let unsubscribe = () => {}
+      /**
+       * 订阅句柄放进对象里、而不是闭包变量：cleanup 可能先于 `ready` 执行
+       * （切换会话/关面板很快时）。用对象才能让 cleanup 读到「后来才赋上」的函数。
+       */
+      const subscription = { off: () => {} }
+      /** cleanup 先跑时置真，阻止 ready 回调再订阅（否则订阅永不取消、内容串到新会话）。 */
+      let cancelled = false
+      let released = false
+      const release = () => {
+        if (released) return
+        released = true
+        try { subscription.off() } catch { /* 忽略 */ }
+        try { reference?.release() } catch { /* 忽略 */ }
+      }
       try {
         reference = promptSessions.retain(sessionId, { source: 'controllerOperation' })
         reference.ready.then((binding) => {
+          if (cancelled) return // 已经卸载：不再订阅，也不再 emit
           const source = binding?.eventSource
           if (source === undefined || typeof source.subscribe !== 'function') {
             emit({ thinking: '', reply: '', error: '会话没有事件源（eventSource）' })
@@ -221,8 +235,9 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
             }
           }
           publish()
-          unsubscribe = source.subscribe(publish)
+          subscription.off = source.subscribe(publish)
         }, (error) => {
+          if (cancelled) return
           emit({ thinking: '', reply: '', error: `取会话失败：${error instanceof Error ? error.message : String(error)}` })
         })
       } catch (error) {
@@ -237,8 +252,8 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         emit({ thinking: '', reply: '', error: message })
       }
       return () => {
-        try { unsubscribe() } catch { /* 忽略 */ }
-        try { reference?.release() } catch { /* 忽略 */ }
+        cancelled = true
+        release()
       }
     }
 
@@ -413,11 +428,23 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       input.accept = '.pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation'
       input.style.display = 'none'
       let settled = false
-      const finish = (value) => {
+      let focusTimer = null
+      // 注意：这里必须用全局 `window`。`apply` 作用域里没有 `win`
+      // （那只是 createPptApp 内部的局部变量），曾经写 `win.addEventListener`
+      // 抛 ReferenceError 被空 catch 吞掉 → 取消对话框后 Promise 永不 resolve，
+      // 界面没有任何反馈，隐藏的 <input> 还留在 body 里。
+      const view = window
+      const cleanup = () => {
+        if (focusTimer !== null) { try { clearTimeout(focusTimer) } catch { /* 忽略 */ } focusTimer = null }
+        try { view.removeEventListener('focus', onFocus) } catch { /* 忽略 */ }
+        try { input.remove() } catch { /* 已经被移除 */ }
+      }
+      const finish = (value, error) => {
         if (settled) return
         settled = true
-        try { input.remove() } catch { /* 已经被移除 */ }
-        resolve(value)
+        cleanup()
+        if (error !== undefined) reject(error)
+        else resolve(value)
       }
       input.addEventListener('change', () => {
         const file = input.files?.[0]
@@ -427,7 +454,8 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
           return
         }
         const reader = new FileReader()
-        reader.onerror = () => reject(new Error('读取所选文件失败'))
+        // 失败也要收尾，否则 input 留在 DOM、Promise 挂着。
+        reader.onerror = () => finish(null, new Error('读取所选文件失败'))
         reader.onload = () => {
           const url = String(reader.result ?? '')
           const comma = url.indexOf(',')
@@ -435,12 +463,14 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         }
         reader.readAsDataURL(file)
       })
-      // 取消时浏览器不发 change：窗口重新聚焦后再等一小会儿收尾，避免 Promise 永远挂着。
-      const onFocus = () => {
-        setTimeout(() => { if (!settled) finish(null) }, 800)
-        try { win.removeEventListener('focus', onFocus) } catch { /* 忽略 */ }
+      // 用户点「取消」时浏览器不发 change（现代浏览器会发 cancel 事件）。
+      input.addEventListener('cancel', () => finish(null))
+      // 兼容：窗口重新聚焦后再等一小会儿收尾，避免 Promise 永远挂着。
+      function onFocus() {
+        try { view.removeEventListener('focus', onFocus) } catch { /* 忽略 */ }
+        focusTimer = setTimeout(() => { if (!settled) finish(null) }, 800)
       }
-      try { win.addEventListener('focus', onFocus) } catch { /* 容器可能不支持 */ }
+      try { view.addEventListener('focus', onFocus) } catch { /* 容器可能不支持 */ }
       document.body.appendChild(input)
       input.click()
     })
