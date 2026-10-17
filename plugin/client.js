@@ -2019,7 +2019,12 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       // 最小化状态下没人监听会话，就永远等不到这条提示。
       const seenPromptRef = React.useRef('')
       React.useEffect(() => {
-        if (state.open === true) return undefined        // 已经打开，不必提示
+        if (state.open === true) {
+          // 面板已展开（无论是点提示卡还是侧边栏按钮）：清掉待显示的提示，
+          // 否则下次收起时这张卡会又冒出来。
+          if (state.pptPrompt !== null && state.pptPrompt !== undefined) store.set({ pptPrompt: null })
+          return undefined
+        }
         if (typeof watchAi !== 'function') return undefined
         let sessionId = typeof state.sessionId === 'string' ? state.sessionId : ''
         if (sessionId === '') {

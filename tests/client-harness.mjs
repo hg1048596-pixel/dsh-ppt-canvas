@@ -1077,6 +1077,14 @@ step('client: 用户提到做/改 PPT → 最小化状态下弹出「是否打�
   await scheduler.flush(1)
   assertEqual(exposedStore.get().pptPrompt, null, '插件自己发的指令不应触发提示')
 
+  // 面板展开后提示必须清掉（否则收起时又冒出来）
+  exposedStore.set(current => ({ ...current, open: false, pptPrompt: { text: '帮我做 PPT' } }))
+  renderFloating()                       // 收起态：卡在
+  exposedStore.set(current => ({ ...current, open: true }))
+  renderFloating()                       // 展开：effect 应清掉 pptPrompt
+  assertEqual(exposedStore.get().pptPrompt, null, '展开面板后应清掉待显示的提示')
+  exposedStore.set(current => ({ ...current, open: false }))
+
   retainPlan = null
   exposedStore.set(current => ({ ...current, open: false, sessionId: '', pptPrompt: null }))
 })
