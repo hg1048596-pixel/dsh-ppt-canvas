@@ -384,16 +384,37 @@ function readLineSpacing(pPr) {
   return null
 }
 
-/** `a:spcBef` / `a:spcAft` 的段前段后间距 → px。 */
-function readParaSpacing(pPr, tag) {
+/**
+ * `a:spcBef` / `a:spcAft` 的段前段后间距。
+ *
+ * 两种写法都要支持，之前只处理了 `a:spcPts`（绝对磅值），把 `a:spcPct`
+ * （**相对字号的百分比**，PowerPoint 里很常见）整段丢掉了 —— 而且测试把"丢"锁成了正确行为。
+ *
+ * @returns {{ px: number|null, pct: number|null }|null}
+ *   px  = 绝对像素（spcPts 换算得到）
+ *   pct = 相对字号的比例（spcPct，100000 表示 100%）
+ */
+function readParaSpacingFull(pPr, tag) {
   if (pPr === undefined) return null
   const node = childOf(pPr, tag)
   if (node === undefined) return null
   const pts = childOf(node, 'a:spcPts')
-  if (pts === undefined) return null
-  const raw = Number(getAttr(pts, 'val'))
-  if (!Number.isFinite(raw) || raw < 0) return null
-  return (raw / 100) * (96 / 72)
+  if (pts !== undefined) {
+    const raw = Number(getAttr(pts, 'val'))
+    if (Number.isFinite(raw) && raw >= 0) return { px: (raw / 100) * (96 / 72), pct: null }
+  }
+  const pct = childOf(node, 'a:spcPct')
+  if (pct !== undefined) {
+    const raw = Number(getAttr(pct, 'val'))
+    if (Number.isFinite(raw)) return { px: null, pct: raw / 100000 }
+  }
+  return null
+}
+
+/** 兼容旧调用：只要像素值。 */
+function readParaSpacing(pPr, tag) {
+  const full = readParaSpacingFull(pPr, tag)
+  return full === null ? null : full.px
 }
 
 /**
@@ -448,6 +469,9 @@ function readMasterTextDefaults(masterTree) {
       ...spacing,
       spaceBefore: readParaSpacing(lvl, 'a:spcBef'),
       spaceAfter: readParaSpacing(lvl, 'a:spcAft'),
+      // 百分比形式的段前/段后（a:spcPct，相对字号）
+      spaceBeforePct: readParaSpacingFull(lvl, 'a:spcBef')?.pct ?? null,
+      spaceAfterPct: readParaSpacingFull(lvl, 'a:spcAft')?.pct ?? null,
       // marL 是整段的左边界，indent 是首行相对 marL 的偏移（负值 = 悬挂缩进）
       marL: Number.isFinite(marL) ? marL / 9525 : null,
       indent: Number.isFinite(indent) ? indent / 9525 : null,
@@ -457,6 +481,94 @@ function readMasterTextDefaults(masterTree) {
   }
 
   return { title: levelDefaults('p:titleStyle'), body: levelDefaults('p:bodyStyle') }
+}
+
+/** 在 rels 里找指向某类部件的第一个目标（已规范化成包内路径）。 */
+function findRelatedPart(ownerPart, rels, typeSuffix) {
+  for (const rel of rels.values()) {
+    if (typeof rel?.type === 'string' && rel.type.endsWith(typeSuffix)) {
+      return resolveTarget(ownerPart, rel.target)
+    }
+  }
+  return null
+}
+
+/**
+ * 收集某部件里各占位符的几何（**只填空缺的键**，先写者优先）。
+ * @returns {boolean} 该部件是否存在且能解析
+ */
+function collectPlaceholderGeometry(entries, partName, into, warnings) {
+  const bytes = entries.get(partName)
+  if (bytes === undefined) return false
+  let tree
+  try {
+    tree = parseXml(Buffer.from(bytes).toString('utf8'))
+  } catch (error) {
+    warnings.push(`${partName} cannot be parsed: ${error.message}`)
+    return false
+  }
+  for (const sp of findAll(tree, 'p:sp')) {
+    const nvSpPr = childOf(sp, 'p:nvSpPr')
+    const nvPr = nvSpPr === undefined ? undefined : childOf(nvSpPr, 'p:nvPr')
+    const ph = nvPr === undefined ? undefined : childOf(nvPr, 'p:ph')
+    if (ph === undefined) continue
+    const spPr = childOf(sp, 'p:spPr')
+    const xfrm = spPr === undefined ? undefined : childOf(spPr, 'a:xfrm')
+    if (xfrm === undefined) continue // 这一级没写几何，留给下一级（layout → master）
+    const off = childOf(xfrm, 'a:off')
+    const ext = childOf(xfrm, 'a:ext')
+    const geometry = {
+      x: emuToPx(getAttr(off, 'x')),
+      y: emuToPx(getAttr(off, 'y')),
+      w: emuToPx(getAttr(ext, 'cx')),
+      h: emuToPx(getAttr(ext, 'cy')),
+    }
+    const idx = getAttr(ph, 'idx')
+    const type = getAttr(ph, 'type')
+    if (idx !== undefined && !into.has(`idx:${idx}`)) into.set(`idx:${idx}`, geometry)
+    if (type !== undefined && !into.has(`type:${type}`)) into.set(`type:${type}`, geometry)
+  }
+  return true
+}
+
+/**
+ * 读占位符的继承几何，顺序：**slideLayout → slideMaster**。
+ *
+ * 真实 PowerPoint（以及 python-pptx 生成的默认文稿）里，幻灯片上的标题/正文
+ * `<p:spPr/>` 没有 `a:xfrm`；**slideLayout 里的占位符也常常没有**，
+ * 真正的坐标写在 slideMaster 上（例如 `<a:off x="457200" y="274638"/>`）。
+ * 只查 layout 会得到全 0 几何 —— 画布选择框、框选命中、发给 AI 的坐标全错，
+ * 而且写入端 move/resize 会以 0 为基准把形状压坏。
+ *
+ * @returns {Map<string, {x:number,y:number,w:number,h:number}>} 键为 `idx:<n>` 或 `type:<t>`
+ */
+function readLayoutPlaceholders(entries, slidePart, slideRels, warnings, cache) {
+  const layoutPart = findRelatedPart(slidePart, slideRels, '/slideLayout')
+  if (layoutPart === null) return new Map()
+  if (cache !== undefined && cache.has(layoutPart)) return cache.get(layoutPart)
+
+  const result = new Map()
+  if (collectPlaceholderGeometry(entries, layoutPart, result, warnings)) {
+    const layoutRels = parseRels(entries, layoutPart)
+    const masterPart = findRelatedPart(layoutPart, layoutRels, '/slideMaster')
+    if (masterPart !== null) collectPlaceholderGeometry(entries, masterPart, result, warnings)
+  }
+  if (cache !== undefined) cache.set(layoutPart, result)
+  return result
+}
+
+/** 按 idx 优先、type 兜底，从版式占位符里找继承几何。 */
+function lookupLayoutGeometry(placeholder, layoutPlaceholders) {
+  if (layoutPlaceholders === undefined || layoutPlaceholders === null) return null
+  const idx = placeholder?.idx
+  const type = placeholder?.type
+  if (idx !== undefined && idx !== null && layoutPlaceholders.has(`idx:${idx}`)) {
+    return layoutPlaceholders.get(`idx:${idx}`)
+  }
+  if (type !== undefined && type !== null && layoutPlaceholders.has(`type:${type}`)) {
+    return layoutPlaceholders.get(`type:${type}`)
+  }
+  return null
 }
 
 /** 从 a:lstStyle 的对应层级取默认 run 属性。 */
@@ -487,9 +599,13 @@ function readTextBody(txBody, theme, masterDefaults) {
   const anchor = bodyPr === undefined ? null : anchorFromOoxml(getAttr(bodyPr, 'anchor'))
   const insets = readBodyInsets(bodyPr)
   // 自动缩放：spAutoFit（随文字调整形状）/ normAutofit（缩字号适应）/ noAutofit
-  const autofit = childOf(bodyPr, 'a:normAutofit') !== undefined
-    ? 'norm'
-    : (childOf(bodyPr, 'a:spAutoFit') !== undefined ? 'shape' : (childOf(bodyPr, 'a:noAutofit') !== undefined ? 'none' : null))
+  // 注意 bodyPr 可能整个缺失（精简/第三方生成的 txBody 常见），
+  // 直接 childOf(undefined, …) 会抛 TypeError 让整页读不出来。
+  const autofit = bodyPr === undefined
+    ? null
+    : (childOf(bodyPr, 'a:normAutofit') !== undefined
+        ? 'norm'
+        : (childOf(bodyPr, 'a:spAutoFit') !== undefined ? 'shape' : (childOf(bodyPr, 'a:noAutofit') !== undefined ? 'none' : null)))
   const paragraphs = []
   const plainParts = []
 
@@ -528,6 +644,8 @@ function readTextBody(txBody, theme, masterDefaults) {
       ? { lnSpc: null, lnSpcIsPx: false }
       : { lnSpc: fallback.lnSpc, lnSpcIsPx: fallback.lnSpcIsPx === true })
     const ownAlign = pPr === undefined ? null : alignFromOoxml(getAttr(pPr, 'algn'))
+    const spacingBefore = readParaSpacingFull(pPr, 'a:spcBef')
+    const spacingAfter = readParaSpacingFull(pPr, 'a:spcAft')
     const ownMarL = (() => {
       const raw = Number(getAttr(pPr, 'marL'))
       return Number.isFinite(raw) ? raw / 9525 : null
@@ -536,8 +654,12 @@ function readTextBody(txBody, theme, masterDefaults) {
       level: Number.isFinite(level) ? level : 0,
       align: ownAlign ?? fallback?.align ?? null,
       ...spacing,
-      spaceBefore: readParaSpacing(pPr, 'a:spcBef') ?? fallback?.spaceBefore ?? null,
-      spaceAfter: readParaSpacing(pPr, 'a:spcAft') ?? fallback?.spaceAfter ?? null,
+      spaceBefore: spacingBefore?.px ?? fallback?.spaceBefore ?? null,
+      spaceAfter: spacingAfter?.px ?? fallback?.spaceAfter ?? null,
+      // 百分比形式（a:spcPct）保留为比例：它相对**字号**，Client 按行高换算成 px。
+      // 之前整个字段被丢弃，段前段后间距静默消失。
+      spaceBeforePct: spacingBefore?.pct ?? fallback?.spaceBeforePct ?? null,
+      spaceAfterPct: spacingAfter?.pct ?? fallback?.spaceAfterPct ?? null,
       // marL 是段落左边界；母版的 bodyStyle 通常给 marL=228600（24px）配悬挂缩进
       indent: ownMarL ?? fallback?.marL ?? null,
       runs,
@@ -691,7 +813,14 @@ function readShape(container, context) {
   const identity = shapeNameOf(container)
   const spPr = spPrOf(container)
   const geometry = transformOf(container, spPr)
-  if (!geometry.hasTransform) warnings.push(`shape ${identity.id} (${identity.name}) has no a:xfrm; geometry defaults to 0`)
+  // 没有 a:xfrm 是**正常**的：占位符的位置继承自 slideLayout（见下方继承逻辑）。
+  // 只有既没有 xfrm、又继承不到几何时才值得警告 —— 那种形状真的是 0×0@0,0。
+  const hasPlaceholder = childOf(container, 'p:nvSpPr') !== undefined
+    && childOf(childOf(container, 'p:nvSpPr'), 'p:nvPr') !== undefined
+    && childOf(childOf(childOf(container, 'p:nvSpPr'), 'p:nvPr'), 'p:ph') !== undefined
+  if (!geometry.hasTransform && !hasPlaceholder) {
+    warnings.push(`shape ${identity.id} (${identity.name}) has no a:xfrm; geometry defaults to 0`)
+  }
   const preset = readGeometryPreset(spPr)
   const fill = readFill(spPr, theme)
   const line = readLine(spPr, theme)
@@ -749,6 +878,18 @@ function readShape(container, context) {
   if (name === 'p:sp') {
     const classified = classifySp(container)
     const txBody = childOf(container, 'p:txBody')
+    // 占位符没有自己的 a:xfrm 时，几何继承自 slideLayout 的同名占位符。
+    // 不做这一步的话，真实 PowerPoint 文件的标题/正文全是 0×0@0,0：
+    // 画布选择框看不见、框选命中不了、发给 AI 的坐标也全是 0。
+    if (geometry.hasTransform !== true && classified.placeholder !== null && classified.placeholder !== undefined) {
+      const inherited = lookupLayoutGeometry(classified.placeholder, context.layoutPlaceholders)
+      if (inherited !== null) {
+        base.geometry.x = inherited.x
+        base.geometry.y = inherited.y
+        base.geometry.w = inherited.w
+        base.geometry.h = inherited.h
+      }
+    }
     // 排版默认值来自母版：标题走 titleStyle，其余走 bodyStyle。
     // 实测用户的文件里 lnSpc=0.9 与 spcBef=10pt **只在母版**，读不到就会行距错、文字挤。
     //
@@ -900,6 +1041,8 @@ export function readDeck(buffer, filePath, rev = 0) {
   }
 
   const slides = []
+  // 版式占位符几何缓存：同一版式被多页共用，避免每页重复解析 layout+master。
+  const layoutCache = new Map()
   slideParts.forEach((slidePart, index) => {
     const bytes = entries.get(slidePart)
     if (bytes === undefined) {
@@ -915,6 +1058,10 @@ export function readDeck(buffer, filePath, rev = 0) {
     }
     const slideId = slideTokenOf(slidePart)
     const rels = parseRels(entries, slidePart)
+    // 占位符的几何继承：真实 PowerPoint 的标题/正文 `<p:spPr>` **没有 a:xfrm**，
+    // 位置与尺寸来自 slideLayout 里同一 idx/type 的占位符。不继承的话
+    // deck 里每个占位符都是 0×0@0,0 —— 画布选择框、框选命中、AI 上下文坐标全错。
+    const layoutPlaceholders = readLayoutPlaceholders(entries, slidePart, rels, warnings, layoutCache)
     const cSld = childOf(root, 'p:cSld')
     const spTree = cSld === undefined ? undefined : childOf(cSld, 'p:spTree')
     let background = '#FFFFFF'
@@ -929,7 +1076,7 @@ export function readDeck(buffer, filePath, rev = 0) {
     if (spTree !== undefined) {
       let z = 0
       for (const child of childrenOf(spTree)) {
-        const shape = readShape(child, { slideId, slidePart, rels, theme, mediaIndex, warnings, masterText })
+        const shape = readShape(child, { slideId, slidePart, rels, theme, mediaIndex, warnings, masterText, layoutPlaceholders })
         if (shape === null) continue
         shape.z = z
         shape.image = shape.image === null ? null : {

@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { parseXml, serializeXml, findAll, findFirst, textOf, createElement, appendChild, childrenOf, childOf, removeChild, removeChildren, setAttr, setText } from '../host/xml.js'
+import { parseXml, serializeXml, findAll, findFirst, textOf, createElement, appendChild, childrenOf, childOf, removeChild, removeChildren, setAttr, setText, getAttr } from '../host/xml.js'
 import { readZipEntries, readZip, writeZip, crc32 } from '../host/zip.js'
 import { readDeck, loadPackage, deckKeyOf } from '../host/pptx-read.js'
 import { applyPatch } from '../host/pptx-write.js'
@@ -221,15 +221,18 @@ check('read: 本段没写的字段沿用母版默认值，母版也没有才是 
   for (const paragraph of body.text.paragraphs) {
     // fixture 的段落自己写了 lnSpc=125%，覆盖母版
     assertEqual(paragraph.lnSpc, 1.25, '段落自己的 lnSpc 优先于母版')
-    // fixture 的母版与段落都没有 spcBef/spcAft → 必须是 null
-    assertEqual(paragraph.spaceBefore, null, '两处都没有 spcBef 时必须是 null')
+    // fixture 母版 bodyStyle 的段前是 `<a:spcBef><a:spcPct val="20000"/>`（**百分比**，20%）。
+    // 以前 readParaSpacing 只认 a:spcPts，把百分比形式整段丢掉，
+    // 而这条测试当时写的是 `spaceBefore === null` —— 等于把 bug 锁成正确行为。
+    // 现在百分比会以 spaceBeforePct 形式产出（相对字号），px 形式仍为 null。
+    assertEqual(paragraph.spaceBefore, null, '百分比形式不产出 px 值')
+    assertEqual(paragraph.spaceBeforePct, 0.2, '母版的 spcPct=20000 应解析成 0.2（20%）')
+    // 母版没有 spcAft → 两种形式都必须是 null
     assertEqual(paragraph.spaceAfter, null, '两处都没有 spcAft 时必须是 null')
-    // indent 来自母版 bodyStyle 的 marL（fixture 母版给了 228600 EMU = 24px），
+    assertEqual(paragraph.spaceAfterPct, null, '两处都没有 spcAft 时 pct 也必须是 null')
+    // indent 来自母版 bodyStyle 的 marL（fixture 母版 marL=342900 EMU = 36px），
     // 所以这里**不应该**是 null —— 曾经因为完全没读母版而丢失。
-    assert(
-      paragraph.indent === null || paragraph.indent > 0,
-      'indent 要么是母版来的正数，要么两处都没有才为 null',
-    )
+    assertEqual(paragraph.indent, 36, 'indent 应来自母版 marL（36px）')
   }
 })
 
@@ -319,14 +322,133 @@ check('read: 占位符标题走 titleStyle、正文走 bodyStyle（母版继承�
   const deck = readDeck(injected, deckPath, 0)
   const titled = deck.slides[0].shapes.filter(shape => shape.placeholder !== null && shape.placeholder !== undefined)
   assertEqual(titled.length, 2, '两个占位符都应保留')
-  // 两个形状的段落样式必须能正常读出（lnSpc 有限正数或 null），不能是 NaN/异常
-  for (const shape of titled) {
-    for (const paragraph of shape.text.paragraphs) {
-      if (paragraph.lnSpc === null) continue
-      assert(Number.isFinite(paragraph.lnSpc) && paragraph.lnSpc > 0 && paragraph.lnSpc < 5,
-        `占位符段落的 lnSpc 异常：${paragraph.lnSpc}`)
-    }
-  }
+
+  // 必须能**区分** titleStyle 与 bodyStyle，否则这个测试等于空转。
+  //
+  // 注意：不能用 align 区分 —— fixture 的段落自己写了 `algn="l"`，按继承规则
+  // 本就该覆盖母版的居中（这是正确行为，我一开始断言错了）。要挑**幻灯片没写、
+  // 只有母版有**的字段：
+  //   titleStyle: spcBef=0%，无 marL
+  //   bodyStyle : spcBef=20%，marL=342900(36px)
+  const titleShape = titled.find(shape => shape.placeholder.type === 'title')
+  const bodyShape = titled.find(shape => shape.placeholder.type === 'body')
+  assert(titleShape !== undefined && bodyShape !== undefined, '两个占位符类型都要在')
+
+  const titlePara = titleShape.text.paragraphs[0]
+  const bodyPara = bodyShape.text.paragraphs[0]
+  assertEqual(titlePara.spaceBeforePct, 0, `标题应继承 titleStyle 的 spcBef=0%（got ${titlePara.spaceBeforePct}）`)
+  assertEqual(titlePara.indent, null, 'titleStyle 没有 marL，标题不应有缩进')
+
+  assertEqual(bodyPara.spaceBeforePct, 0.2, `正文应继承 bodyStyle 的 spcBef=20%（got ${bodyPara.spaceBeforePct}）`)
+  assertEqual(bodyPara.indent, 36, `正文应继承 bodyStyle 的 marL=36px（got ${bodyPara.indent}）`)
+})
+
+check('read: 占位符没有 a:xfrm 时从 slideLayout 继承几何（否则是 0×0@0,0）', () => {
+  // 真实 PowerPoint 的标题/正文 `<p:spPr/>` 里没有 a:xfrm，位置与尺寸来自版式。
+  // 不继承的话：deck 里全是 0×0@0,0 → 画布选择框看不见、框选命中不了、
+  // 发给 AI 的坐标全是 0，而且写入端 move/resize 会从 0 起算。
+  const entries = readZipEntries(readFileSync(FIXTURE))
+  // 必须改**slide1 真正引用的那个版式**：包里可能有多份 layout，
+  // 改了个没被引用的等于没改（我第一版就栽在这里）。
+  const relsEntry = entries.find(entry => entry.name === 'ppt/slides/_rels/slide1.xml.rels')
+  assert(relsEntry !== undefined, 'fixture 应有 slide1 的 rels')
+  const relsRoot = parseXml(Buffer.from(relsEntry.data).toString('utf8'))
+  const layoutRel = childrenOf(relsRoot, 'Relationship')
+    .find(node => String(getAttr(node, 'Type') ?? '').endsWith('/slideLayout'))
+  assert(layoutRel !== undefined, 'slide1 应引用一个 slideLayout')
+  const layoutTarget = String(getAttr(layoutRel, 'Target')).replace(/^\.\.\//, 'ppt/')
+  const layoutEntry = entries.find(entry => entry.name === layoutTarget)
+  assert(layoutEntry !== undefined, `找不到引用的版式 ${layoutTarget}`)
+
+  // 母版：二级继承的来源（python-pptx 生成的 deck 里 layout 占位符常没有 xfrm）
+  const layoutRelsEntry = entries.find(entry => entry.name === `ppt/slideLayouts/_rels/${layoutTarget.split('/').pop()}.rels`)
+  assert(layoutRelsEntry !== undefined, '版式应有一个 rels 指向母版')
+  const layoutRelsRoot = parseXml(Buffer.from(layoutRelsEntry.data).toString('utf8'))
+  const masterRel = childrenOf(layoutRelsRoot, 'Relationship')
+    .find(node => String(getAttr(node, 'Type') ?? '').endsWith('/slideMaster'))
+  assert(masterRel !== undefined, '版式应引用母版')
+  const masterTarget = String(getAttr(masterRel, 'Target')).replace(/^\.\.\//, 'ppt/')
+  const masterEntry = entries.find(entry => entry.name === masterTarget)
+  assert(masterEntry !== undefined, `找不到引用的母版 ${masterTarget}`)
+
+  // 版式里放一个**没有 xfrm** 的 idx=7 占位符（这正是 python-pptx / PowerPoint
+  // 常见形态：layout 的标题/正文都是空 <p:spPr/>），真坐标写在母版上。
+  const layoutRoot = parseXml(Buffer.from(layoutEntry.data).toString('utf8'))
+  const spTree = findFirst(layoutRoot, 'p:spTree')
+  const sp = createElement('p:sp')
+  const nvSpPr = createElement('p:nvSpPr')
+  const nvPr = createElement('p:nvPr')
+  const ph = createElement('p:ph')
+  setAttr(ph, 'idx', '7')
+  appendChild(nvPr, ph)
+  appendChild(nvSpPr, nvPr)
+  appendChild(sp, nvSpPr)
+  appendChild(sp, createElement('p:spPr'))
+  appendChild(spTree, sp)
+
+  // 母版里给出真正的几何 200×100@(30,40)
+  const masterRoot = parseXml(Buffer.from(masterEntry.data).toString('utf8'))
+  const masterTree = findFirst(masterRoot, 'p:spTree')
+  const mSp = createElement('p:sp')
+  const mNvSpPr = createElement('p:nvSpPr')
+  const mNvPr = createElement('p:nvPr')
+  const mPh = createElement('p:ph')
+  setAttr(mPh, 'idx', '7')
+  appendChild(mNvPr, mPh)
+  appendChild(mNvSpPr, mNvPr)
+  appendChild(mSp, mNvSpPr)
+  const mSpPr = createElement('p:spPr')
+  const xfrm = createElement('a:xfrm')
+  appendChild(xfrm, createElement('a:off', { x: String(30 * 9525), y: String(40 * 9525) }))
+  appendChild(xfrm, createElement('a:ext', { cx: String(200 * 9525), cy: String(100 * 9525) }))
+  appendChild(mSpPr, xfrm)
+  appendChild(mSp, mSpPr)
+  appendChild(masterTree, mSp)
+
+  // 幻灯片上放一个同 idx 的占位符，**不给 xfrm**
+  const slideEntry = entries.find(entry => entry.name === 'ppt/slides/slide1.xml')
+  const slideRoot = parseXml(Buffer.from(slideEntry.data).toString('utf8'))
+  const slideTree = findFirst(slideRoot, 'p:spTree')
+  const slideSp = createElement('p:sp')
+  const sNvSpPr = createElement('p:nvSpPr')
+  const sNvPr = createElement('p:nvPr')
+  const sPh = createElement('p:ph')
+  setAttr(sPh, 'idx', '7')
+  appendChild(sNvPr, sPh)
+  appendChild(sNvSpPr, sNvPr)
+  appendChild(slideSp, sNvSpPr)
+  appendChild(slideSp, createElement('p:spPr'))
+  const txBody = createElement('p:txBody')
+  const para = createElement('a:p')
+  const run = createElement('a:r')
+  const t = createElement('a:t')
+  setText(t, '继承几何的标题')
+  appendChild(run, t)
+  appendChild(para, run)
+  appendChild(txBody, para)
+  appendChild(slideSp, txBody)
+  appendChild(slideTree, slideSp)
+
+  const injected = writeZip(entries.map(entry => {
+    if (entry.name === layoutEntry.name) return { name: entry.name, data: Buffer.from(serializeXml(layoutRoot)) }
+    if (entry.name === masterEntry.name) return { name: entry.name, data: Buffer.from(serializeXml(masterRoot)) }
+    if (entry.name === 'ppt/slides/slide1.xml') return { name: entry.name, data: Buffer.from(serializeXml(slideRoot)) }
+    return { name: entry.name, data: entry.data }
+  }))
+
+  const deck = readDeck(injected, deckPath, 0)
+  const inherited = deck.slides[0].shapes.find(shape => shape.text !== null && shape.text.plain.includes('继承几何'))
+  assert(inherited !== undefined, '注入的占位符应当被读出')
+  // 版式里没有 xfrm，所以几何必须来自**母版**（二级继承）
+  assertEqual(inherited.geometry.x, 30, 'x 应从母版继承（layout 没有 xfrm）')
+  assertEqual(inherited.geometry.y, 40, 'y 应从母版继承')
+  assertEqual(inherited.geometry.w, 200, '宽应从母版继承')
+  assertEqual(inherited.geometry.h, 100, '高应从母版继承')
+  // 无 xfrm 的占位符不该再报「geometry defaults to 0」这种误导性告警
+  assert(
+    !deck.warnings.some(warning => warning.includes('no a:xfrm')),
+    `占位符不应产生 "no a:xfrm" 告警，实际：${JSON.stringify(deck.warnings.slice(0, 3))}`,
+  )
 })
 
 // ---------------------------------------------------------------- 补丁

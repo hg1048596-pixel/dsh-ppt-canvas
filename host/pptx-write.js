@@ -326,10 +326,17 @@ function txBodyFor(element) {
   return childOf(element, 'p:txBody')
 }
 
-/** 元素的几何（px），用于相对位移与对齐。 */
+/**
+ * 元素的几何（px），用于相对位移与对齐。
+ *
+ * **真实 PowerPoint 的占位符没有 `a:xfrm`**（标题/正文的位置与尺寸继承自 slideLayout），
+ * 以前这里直接 childOf(undefined) → TypeError → 任何编辑都 500。
+ * 拿不到 xfrm 时返回 0 几何（不崩），位置继承关系保持不动。
+ */
 function geometryOf(element) {
   const spPr = spPrFor(element)
   const xfrm = element.name === 'p:graphicFrame' ? spPr : (spPr === undefined ? undefined : childOf(spPr, 'a:xfrm'))
+  if (xfrm === undefined) return { x: 0, y: 0, w: 0, h: 0 }
   const off = childOf(xfrm, 'a:off')
   const ext = childOf(xfrm, 'a:ext')
   return {

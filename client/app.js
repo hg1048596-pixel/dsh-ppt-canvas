@@ -398,7 +398,10 @@ function createPptApp(options) {
       width: `${px(Math.max(0, geometry.w))}px`,
       height: `${px(Math.max(0, geometry.h))}px`,
       zIndex: String(shape.z + 1),
-      background: 'transparent',
+      // 不要在这里写 background：内联样式优先级高于样式表，会把
+      // `.is-overlay.is-selected` / `.is-ai-changed` 的底色全部盖掉
+      // （表现：选中只有边框、AI 改动的橙色高亮永远看不到）。
+      // 透明底由 `.dsh-ppt-el.is-overlay{background:transparent}` 负责。
     }
     if (Number.isFinite(geometry.rotation) && geometry.rotation !== 0) {
       style.transform = `rotate(${px(geometry.rotation)}deg)`
@@ -1267,16 +1270,35 @@ function createPptApp(options) {
     return null
   }
 
-  function numberField(label, value, onCommit) {
+  /**
+   * 数字输入框。
+   *
+   * 两个坑都在这里修掉：
+   *  1. **key 要带上元素身份**：它非受控（defaultValue），React 复用同一个 input 时
+   *     不会重放 defaultValue → 切换选中元素后仍显示上一个元素的值，失焦就把错值写回去。
+   *  2. **没变化不提交**：无脑 onCommit 会让「点进点出」也发一次 apply —— 写盘、rev+1、
+   *     撤销栈多一条、底图重渲染，AI 处理中还可能与 AI 抢 rev。
+   *
+   * @param {string|null} label
+   * @param {number} value 当前真实值
+   * @param {(next: number) => void} onCommit
+   * @param {string} [identity] 元素身份（用于 key 与「是否变化」判断）
+   */
+  function numberField(label, value, onCommit, identity) {
+    const rounded = Number.isFinite(value) ? Math.round(value * 10) / 10 : 0
     return h('div', { className: 'dsh-ppt-numfield', key: label ?? 'value' },
       label === null ? null : h('span', { className: 'dsh-ppt-numlabel' }, label),
       h('input', {
         type: 'number',
         className: 'dsh-ppt-input dsh-ppt-num',
-        defaultValue: Number.isFinite(value) ? Math.round(value * 10) / 10 : 0,
+        // 身份变化时重建 input，defaultValue 才会重新生效
+        key: `${identity ?? ''}:${label ?? 'value'}`,
+        defaultValue: rounded,
         onBlur: (event) => {
           const parsed = Number(event.target.value)
-          if (Number.isFinite(parsed)) onCommit(parsed)
+          if (!Number.isFinite(parsed)) return
+          if (Math.round(parsed * 10) / 10 === rounded) return // 没变就不写盘
+          onCommit(parsed)
         },
         onKeyDown: (event) => {
           if (event.key === 'Enter') event.target.blur()
@@ -1377,10 +1399,10 @@ function createPptApp(options) {
       ),
       h('div', { className: 'dsh-ppt-inspector-name', title: first.name }, first.name),
       h('div', { className: 'dsh-ppt-grid2' },
-        numberField('X', first.geometry.x, value => update([{ op: 'setGeometry', id: first.id, x: value }])),
-        numberField('Y', first.geometry.y, value => update([{ op: 'setGeometry', id: first.id, y: value }])),
-        numberField('宽', first.geometry.w, value => update([{ op: 'setGeometry', id: first.id, w: Math.max(1, value) }])),
-        numberField('高', first.geometry.h, value => update([{ op: 'setGeometry', id: first.id, h: Math.max(1, value) }])),
+        numberField('X', first.geometry.x, value => update([{ op: 'setGeometry', id: first.id, x: value }]), first.id),
+        numberField('Y', first.geometry.y, value => update([{ op: 'setGeometry', id: first.id, y: value }]), first.id),
+        numberField('宽', first.geometry.w, value => update([{ op: 'setGeometry', id: first.id, w: Math.max(1, value) }]), first.id),
+        numberField('高', first.geometry.h, value => update([{ op: 'setGeometry', id: first.id, h: Math.max(1, value) }]), first.id),
       ),
       first.text !== null && first.text !== undefined
         ? h('div', { className: 'dsh-ppt-field' },
@@ -1391,18 +1413,22 @@ function createPptApp(options) {
               key: `text-${first.id}-${deck.rev}`,
               defaultValue: first.text.plain ?? '',
               rows: 3,
-              onBlur: (event) => update([{
-                op: 'setText',
-                id: first.id,
-                paragraphs: String(event.target.value).split('\n').map(line => ({ runs: [{ text: line }] })),
-              }]),
+              onBlur: (event) => {
+                // 没改就不提交：否则点进点出也会写盘、rev+1、多一条撤销。
+                if (String(event.target.value) === (first.text.plain ?? '')) return
+                update([{
+                  op: 'setText',
+                  id: first.id,
+                  paragraphs: String(event.target.value).split('\n').map(line => ({ runs: [{ text: line }] })),
+                }])
+              },
             }),
           )
         : null,
       h('div', { className: 'dsh-ppt-field' },
         h('label', null, '字号 / 颜色'),
         h('div', { className: 'dsh-ppt-inline' },
-          numberField(null, first.text?.fontSize ?? 18, value => update([{ op: 'setTextStyle', id: first.id, fontSize: value }])),
+          numberField(null, first.text?.fontSize ?? 18, value => update([{ op: 'setTextStyle', id: first.id, fontSize: value }]), `size:${first.id}`),
           h('input', {
             type: 'color',
             className: 'dsh-ppt-color',
@@ -2170,16 +2196,17 @@ function createPptApp(options) {
     }, [store])
 
     const actionsRef = React.useRef({})
-    const pendingRef = React.useRef({ requestId: null, baseRev: 0, changedIds: [] })
     /** 等待令牌：用户点「停止等待」时自增，正在跑的 waitForAi 会自行退出。 */
     const aiWaitTokenRef = React.useRef(0)
 
     const adoptAiResult = React.useCallback((next) => {
+      // 自己算差异：AI 走宿主工具写文件，客户端拿不到 apply 的 changedIds。
+      const before = store.get().deck
+      const changed = diffShapeIds(before, next)
       adoptDeck(next)
-      const changed = pendingRef.current.changedIds
       if (changed.length > 0) highlightChanged(changed)
-      pendingRef.current = { requestId: null, baseRev: 0, changedIds: [] }
-    }, [adoptDeck, highlightChanged])
+      return changed
+    }, [adoptDeck, highlightChanged, store])
 
     /**
      * 等待 AI 把改动落盘。
@@ -2461,7 +2488,6 @@ function createPptApp(options) {
           return
         }
         store.set({ drafts: [], instruction: '', sending: true })
-        pendingRef.current.requestId = requestId
         logOp(`已发送指令给 AI：${text}`, 'ai')
         toast('已发送给 AI', { detail: 'AI 正在生成修改方案，完成后画布会自动刷新。' })
         await waitForAi(requestId, currentDeck.rev)
@@ -2671,13 +2697,18 @@ function createPptApp(options) {
         store,
         state,
         // 传入明确的路径（点列表项）或留空（用输入框里的路径）。
+        // 注意：输入框绑的是 `pickerPath`，不是 `pathDraft`（后者只有点列表项时才写）。
+        // 以前这里读 pathDraft，导致手动输入路径后打开的是上一次的值，空值时还静默无反应。
         onConfirm: (explicitPath) => {
-          const path = typeof explicitPath === 'string' && explicitPath !== ''
+          const typed = typeof explicitPath === 'string' && explicitPath !== ''
             ? explicitPath
-            : store.get().pathDraft.trim()
-          if (path === '') return
+            : String(store.get().pickerPath ?? '').trim()
+          if (typed === '') {
+            store.set({ error: '请先输入或选择一个 .pptx 路径' })
+            return
+          }
           store.set({ askPath: false })
-          void actions.openPath(path)
+          void actions.openPath(typed)
         },
       }),
       h(DropOverlay, { state }),
@@ -2686,6 +2717,50 @@ function createPptApp(options) {
   }
 
   /** 两个高亮集合是否等价（避免无意义的重渲染）。 */
+  /**
+   * 找出两份 Deck 之间**真正变化**的元素 id。
+   *
+   * 为什么在客户端算：AI 是通过宿主工具直接写文件的，客户端拿不到 apply 返回的
+   * `changedIds`（那条数据只存在于工具调用里）。以前把 changedIds 存在 ref 里等
+   * 别人填，结果永远为空 —— 于是「AI 已应用修改，改动元素已高亮」这句就成了谎话。
+   * 自己 diff 还有个好处：外部程序改动、撤销重做也能正确高亮。
+   *
+   * @param {object|null} before
+   * @param {object|null} after
+   * @returns {string[]}
+   */
+  function diffShapeIds(before, after) {
+    if (before === null || before === undefined || after === null || after === undefined) return []
+    const index = (deck) => {
+      const map = new Map()
+      for (const slide of deck.slides ?? []) {
+        for (const shape of slide.shapes ?? []) {
+          map.set(shape.id, shape)
+        }
+      }
+      return map
+    }
+    const oldShapes = index(before)
+    const newShapes = index(after)
+    const changed = []
+    for (const [id, next] of newShapes) {
+      const prev = oldShapes.get(id)
+      if (prev === undefined) { changed.push(id); continue }
+      if ((prev.text?.plain ?? '') !== (next.text?.plain ?? '')) { changed.push(id); continue }
+      const pg = prev.geometry ?? {}
+      const ng = next.geometry ?? {}
+      if (pg.x !== ng.x || pg.y !== ng.y || pg.w !== ng.w || pg.h !== ng.h || pg.rotation !== ng.rotation) { changed.push(id); continue }
+      if ((prev.style?.fill?.color ?? null) !== (next.style?.fill?.color ?? null)) { changed.push(id); continue }
+      if ((prev.style?.line?.color ?? null) !== (next.style?.line?.color ?? null)) { changed.push(id); continue }
+      const rowKey = (shape) => JSON.stringify(shape.table?.cells ?? null)
+      if (rowKey(prev) !== rowKey(next)) { changed.push(id); continue }
+      const zPrev = prev.z
+      const zNext = next.z
+      if (zPrev !== zNext) changed.push(id)
+    }
+    return changed
+  }
+
   function highlightsEqual(a, b) {
     const keysA = Object.keys(a)
     const keysB = Object.keys(b)

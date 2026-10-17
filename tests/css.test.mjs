@@ -85,16 +85,15 @@ check('css: 关键规则都还在（防止插入样式时误删）', () => {
   assert(missing.length === 0, `缺少规则：${missing.join(', ')}`)
 })
 
-check('css: 声明块里不出现裸注释起始（会吃掉后续声明）', () => {
-  const lines = css.split('\n')
-  const bad = []
-  lines.forEach((line, index) => {
-    const text = line.trim()
-    if (text.startsWith('/*') || text.endsWith('*/') || !text.includes('/*')) return
-    // 形如 `color:red;/*comment*/` 是正常的；只有出现在选择器行才可疑（上面已查）
-    void line
-  })
-  assert(bad.length === 0)
+check('css: 注释成对（未闭合的 /* 会吞掉后面所有规则）', () => {
+  // 真正要防的是「注释没闭合」：一个漏掉的 */ 会把后续所有规则都变成注释，
+  // 浏览器静默丢弃，JS/构建/其它测试都不会报错。
+  let open = -1
+  for (let index = 0; index < css.length; index += 1) {
+    if (css.startsWith('/*', index)) { open = index; index += 1; continue }
+    if (css.startsWith('*/', index)) { open = -1; index += 1 }
+  }
+  assert(open === -1, `存在未闭合的注释，起于第 ${css.slice(0, open).split('\n').length} 行`)
 })
 
 console.log('')

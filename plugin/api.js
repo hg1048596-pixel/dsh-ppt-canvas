@@ -412,6 +412,8 @@ const STATUS_BY_CODE = {
   staleRev: 409,
   // 文件被外部程序改过：写入已中止，客户端应提示「重新加载后再试」
   staleFile: 409,
+  // 排队期间文档被 /api/open 切走：本次写入已放弃（不能落到另一份文件上）
+  staleDeck: 409,
   // 来源不在白名单（CSRF 防护）
   forbiddenOrigin: 403,
   ioFailed: 500,

@@ -146,7 +146,16 @@ export class DeckStore {
       throw new DeckError('ioFailed', `cannot parse ${filePath}: ${error.message}`)
     }
     const history = cached?.history ?? this.history
-    if (cached === undefined) history.reset(filePath, 0, 'open')
+    if (cached === undefined) {
+      history.reset(filePath, 0, 'open')
+    } else {
+      // 复用了缓存句柄，但磁盘内容可能已经被**外部程序**换掉了。
+      // 此时必须把历史清空：旧快照的 before/after 都属于旧内容，留着它们
+      // 会让「撤销一次」把旧快照写回磁盘，**静默覆盖外部修改**。
+      // 判据：打开时记录的 mtime 与当前不同，或内容长度变化。
+      const drifted = options.force === true || cached.mtimeMs !== mtimeMs
+      if (drifted) history.reset(filePath, 0, 'reload')
+    }
     const open = new OpenDeck(filePath, buffer, deck, history)
     open.mtimeMs = mtimeMs
     open.deck.rev = open.rev
@@ -248,12 +257,27 @@ export class DeckStore {
    * @param {{dryRun?: boolean, source?: string, requestId?: string}} options
    */
   async apply(patch, options = {}) {
-    return this.enqueueMutation(() => this.applyUnlocked(patch, options))
+    // **入队前**就绑定目标文档：排队期间可能有人 /api/open 切了文档，
+    // 那时再 requireCurrent() 会把本次补丁写到**另一份文件**上
+    // （两份文稿常有相同的 s1:2 之类 id，校验根本拦不住）。
+    const target = this.requireCurrent()
+    return this.enqueueMutation(() => {
+      if (this.current !== target) {
+        throw new DeckError('staleDeck', '文档在排队期间被切换，本次修改已放弃（请重新发送）', {
+          expected: target.filePath,
+          current: this.current === null ? null : this.current.filePath,
+        })
+      }
+      return this.applyUnlocked(patch, options, target)
+    })
   }
 
   /** apply 的实际实现；只应由 enqueueMutation 调用（保证串行）。 */
-  async applyUnlocked(patch, options = {}) {
-    const open = this.requireCurrent()
+  async applyUnlocked(patch, options = {}, bound) {
+    const open = bound ?? this.requireCurrent()
+    if (this.current !== open) {
+      throw new DeckError('staleDeck', '文档已切换，本次修改已放弃')
+    }
     if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
       throw new DeckError('badRequest', 'patch must be an object')
     }
@@ -302,14 +326,26 @@ export class DeckStore {
     // 落盘前确认磁盘上的文件没被外部程序改过（否则会静默覆盖别人的修改）。
     if (options.force !== true) this.assertUnchangedOnDisk(open)
     await writeAtomic(open.filePath, nextBuffer)
-    this.history.push({
-      filePath: open.filePath,
-      rev,
-      before: open.buffer,
-      after: nextBuffer,
-      summary,
-      ops: result.ops ?? [],
-    })
+    // 顺序：先写盘、再记历史。若历史写快照失败（磁盘满/权限），文件已经变了，
+    // 内存状态必须跟着更新，否则后续 apply 会被 staleFile 永久卡住。
+    try {
+      this.history.push({
+        filePath: open.filePath,
+        rev,
+        before: open.buffer,
+        after: nextBuffer,
+        summary,
+        ops: result.ops ?? [],
+      })
+    } catch (error) {
+      // 尽力把内存状态同步到"已写盘"的事实，再报错让调用方知道历史不可用。
+      open.buffer = nextBuffer
+      open.mtimeMs = safeMtime(open.filePath)
+      try { open.deck = readDeck(nextBuffer, open.filePath, rev) } catch { /* 保底 */ }
+      throw new DeckError('ioFailed', `patch 已写入文件，但撤销历史记录失败：${error.message}`, {
+        file: open.filePath, rev,
+      })
+    }
     open.buffer = nextBuffer
     open.mtimeMs = safeMtime(open.filePath)
     let deck
@@ -319,6 +355,9 @@ export class DeckStore {
       throw new DeckError('ioFailed', `the written presentation cannot be re-read: ${error.message}`)
     }
     open.deck = deck
+    // 与 view() 保持一致：契约声明 Deck 顶层有 fileMtimeMs，
+    // 但 apply 这里直接返回 readDeck 的结果，漏了它 → 客户端按契约读会拿到 undefined。
+    deck.fileMtimeMs = open.mtimeMs
     return {
       applied: true,
       dryRun: false,
@@ -333,17 +372,34 @@ export class DeckStore {
 
   /** 撤销 steps 步。 */
   async undo(steps = 1) {
-    return this.enqueueMutation(() => this.#restore('undo', steps))
+    const target = this.requireCurrent()
+    return this.enqueueMutation(() => {
+      if (this.current !== target) {
+        throw new DeckError('staleDeck', '文档在排队期间被切换，本次撤销已放弃')
+      }
+      return this.#restore('undo', steps, target)
+    })
   }
 
   /** 重做 steps 步。 */
   async redo(steps = 1) {
-    return this.enqueueMutation(() => this.#restore('redo', steps))
+    const target = this.requireCurrent()
+    return this.enqueueMutation(() => {
+      if (this.current !== target) {
+        throw new DeckError('staleDeck', '文档在排队期间被切换，本次重做已放弃')
+      }
+      return this.#restore('redo', steps, target)
+    })
   }
 
-  async #restore(direction, steps) {
-    const open = this.requireCurrent()
+  async #restore(direction, steps, bound) {
+    const open = bound ?? this.requireCurrent()
     const count = Number.isFinite(steps) ? Math.max(1, Math.trunc(steps)) : 1
+    // **先**校验磁盘没被外部改过，再动历史游标。
+    // 顺序反了会出真问题：history.undo() 会立刻推进 cursor 与 rev，若随后
+    // assertUnchangedOnDisk 抛 staleFile，文件没写但内存历史已经前进 ——
+    // 之后的 undo/redo/rev 全部错乱（表现为"撤销一次跳到更早的状态"）。
+    this.assertUnchangedOnDisk(open)
     const outcome = direction === 'undo'
       ? this.history.undo(open.filePath, count)
       : this.history.redo(open.filePath, count)
@@ -355,14 +411,13 @@ export class DeckStore {
       )
     }
     const buffer = Buffer.from(outcome.buffer)
-    // 撤销/重做同样会写盘，同样不能覆盖外部修改。
-    this.assertUnchangedOnDisk(open)
     await writeAtomic(open.filePath, buffer)
     open.buffer = buffer
     open.mtimeMs = safeMtime(open.filePath)
     this.history.commitRestore(open.filePath, outcome.rev)
     const deck = readDeck(buffer, open.filePath, outcome.rev)
     open.deck = deck
+    deck.fileMtimeMs = open.mtimeMs
     return deck
   }
 

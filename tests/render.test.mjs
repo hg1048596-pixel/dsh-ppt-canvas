@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 
 import { loadPackage } from '../host/pptx-read.js'
 import { promoteSlide, findSoffice, renderSlidePng } from '../host/render.js'
+import { readZip, writeZip } from '../host/zip.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FIXTURE = join(HERE, 'fixtures', 'demo.pptx')
@@ -85,16 +86,24 @@ check('render: promoteSlide 只替换 slide1.xml 与它的 rels', () => {
     )
   }
 
-  // 其余部件逐字节不变（母版/版式/主题/媒体）
+  // 其余部件**内容**不变（母版/版式/主题/媒体）。
+  //
+  // 注意：必须真的写一次 zip 再读回来比 —— promoteSlide 对未修改部件直接复用
+  // 原 Buffer 引用，若直接比 `promoted.entries.get(name)`，那是同一个对象，
+  // 比较恒为 0（自比较假绿）。真正的检查点是「写出的包」里这些部件的内容。
+  const written = writeZip(promoted.order.map(name => ({ name, data: promoted.entries.get(name) })))
+  const reread = readZip(written)
   let changed = 0
   let compared = 0
   for (const [name, bytes] of demoPkg.entries) {
     if (name === 'ppt/slides/slide1.xml' || name === 'ppt/slides/_rels/slide1.xml.rels') continue
+    const after = reread.get(name)
+    assert(after !== undefined, `写出的包里缺少部件 ${name}`)
     compared += 1
-    if (Buffer.compare(Buffer.from(bytes), Buffer.from(promoted.entries.get(name))) !== 0) changed += 1
+    if (Buffer.compare(Buffer.from(bytes), Buffer.from(after)) !== 0) changed += 1
   }
   assert(compared > 10, `应该有大量部件参与比较，实际 ${compared}`)
-  assertEqual(changed, 0, 'slide1 之外的部件必须逐字节不变')
+  assertEqual(changed, 0, '写出并回读后，slide1 之外的部件内容必须完全一致')
 })
 
 check('render: promoteSlide 不动 presentation.xml 与 Content_Types', () => {
