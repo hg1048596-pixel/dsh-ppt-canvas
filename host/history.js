@@ -7,7 +7,7 @@
 // 落盘位置：<tmp>/dsh-ppt-canvas/<deckKey>/<seq>-<rev>.pptx
 // 上限：每个 deck 50 个快照，超出丢弃最旧的。
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deckKeyOf } from './pptx-read.js'
@@ -41,16 +41,33 @@ class DeckHistory {
     return dir
   }
 
+  /**
+   * 写一份快照。
+   *
+   * **必须原子**：直接 writeFileSync 到最终路径时，进程若在写一半被杀，
+   * 会留下截断的 pptx；而 readSnapshot 不校验大小，undo 会把截断文件写回用户的文稿。
+   * 这里改成「同目录临时文件 + rename」。
+   */
   writeSnapshot(kind, rev, buffer) {
     const dir = this.ensureDir()
     const path = join(dir, `${String(this.seq).padStart(4, '0')}-${kind}-${rev}.pptx`)
-    writeFileSync(path, buffer)
+    const tmp = `${path}.tmp`
+    writeFileSync(tmp, buffer)
+    renameSync(tmp, path)
     this.seq++
     return path
   }
 
+  /** 读快照；文件缺失或明显截断（大小 0）都当作不可用。 */
   readSnapshot(path) {
-    return existsSync(path) ? readFileSync(path) : null
+    if (!existsSync(path)) return null
+    try {
+      const buffer = readFileSync(path)
+      if (buffer.length < 22) return null // 比 ZIP 的 EOCD 还小，肯定不是有效包
+      return buffer
+    } catch {
+      return null
+    }
   }
 
   prune() {

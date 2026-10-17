@@ -94,7 +94,9 @@ function findEocd(buf) {
   for (let i = buf.length - 22; i >= min; i--) {
     if (buf.readUInt32LE(i) !== SIG_EOCD) continue
     const commentLen = buf.readUInt16LE(i + 20)
-    if (i + 22 + commentLen === buf.length || i + 22 + commentLen <= buf.length) return i
+    // 注释长度必须**正好**到文件末尾。原来写成 `=== || <=`，后半句让判断恒真，
+    // 于是「尾部还有垃圾/伪造签名」的包也会被当成 EOCD（解析到错误偏移）。
+    if (i + 22 + commentLen === buf.length) return i
   }
   return -1
 }
@@ -160,6 +162,11 @@ export function readZipEntries(buffer) {
     if (seen.has(name)) throw fail('ioFailed', `duplicate zip entry name: ${name}`)
     seen.add(name)
 
+    // 越界检查必须在 readUInt32LE 之前：恶意/损坏的包给出越界的 localOff 时，
+    // 原来会抛 RangeError（不友好的内部错误），现在给出清晰的 ioFailed。
+    if (localOff + 30 > buf.length) {
+      throw fail('ioFailed', `local header offset ${localOff} is outside the archive for entry ${name}`)
+    }
     if (buf.readUInt32LE(localOff) !== SIG_LOCAL) {
       throw fail('ioFailed', `bad local file header for entry ${name}`)
     }

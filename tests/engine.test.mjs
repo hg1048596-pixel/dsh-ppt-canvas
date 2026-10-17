@@ -543,6 +543,30 @@ check('patch: setTextStyle 打在无文本体元素上必须被拒（不再假�
   assertEqual(code, 'validationFailed', '对表格 setTextStyle 必须是 validationFailed')
 })
 
+check('zip: 尾部垃圾被拒（EOCD 必须正好在文件末尾）', () => {
+  // 原来 findEocd 的注释长度判断写成 `=== || <=`，后半句让它恒真，
+  // 于是「尾部还有垃圾」的包也会被当成合法 EOCD（解析到错误偏移）。
+  const bytes = readFileSync(FIXTURE)
+  const tampered = Buffer.concat([bytes, Buffer.from('trailing-garbage')])
+  let code = null
+  try {
+    readZipEntries(tampered)
+  } catch (error) {
+    code = error.code
+  }
+  assert(code === 'ioFailed' || code === 'badRequest',
+    `尾部带垃圾的包必须被拒（got ${JSON.stringify(code)}），而不是被静默解析`)
+})
+
+check('zip: 解压预算存在（防 zip 炸弹）', () => {
+  // 结构性断言：常量必须存在且合理（单条 256MB / 全包 1GB 量级）。
+  // 真正构造一个炸弹包代价太大，这里守住「护栏被误删」这一类回归。
+  const src = readFileSync(join(HERE, '..', 'host', 'zip.js'), 'utf8')
+  assert(/MAX_ENTRY_INFLATED_BYTES\s*=\s*\d+\s*\*\s*1024\s*\*\s*1024/.test(src), '应有单条解压上限常量')
+  assert(/MAX_TOTAL_INFLATED_BYTES\s*=\s*\d+\s*\*\s*1024\s*\*\s*1024/.test(src), '应有全包解压预算常量')
+  assert(src.includes('maxOutputLength'), 'inflateRawSync 必须传 maxOutputLength')
+})
+
 // ---------------------------------------------------------------- 补丁
 
 check('patch: 混合补丁应用后回读一致', () => {
