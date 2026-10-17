@@ -1,4 +1,4 @@
-# dsh ppt canvas
+# dsh-ppt-canvas
 
 > DeepSeek Harness 插件：在 PPT 画布上**点选 / 框选**组件（文字、色块、图片、线条、表格），
 > 输入一句自然语言修改要求，由 AI 生成具体的修改方案并**实时落到 .pptx 文件与画布**。
@@ -20,7 +20,7 @@
 | **选整页** | 点击页面缩略图左上角「整页」，一次选中该页全部元素（对应 WorkBuddy 的「选页做 AI 编辑」） |
 | **拖拽打开** | 把 `.pptx` 直接拖到面板上即可打开；拖拽时整块界面给出投放提示 |
 | **可拖动浮窗** | 面板标题栏可拖动、右下角可缩放，位置与尺寸记忆在 localStorage |
-| **自然语言指令** | 指令框输入要求，`Ctrl/⌘ + Enter` 发送；`Enter` 加入待发列表，可攒多条一起发 |
+| **自然语言指令** | 指令框输入要求，`Enter` 直接发送（`Shift+Enter` 换行）；「加入待发」可把多条攒起来一起发 |
 | **选区上下文** | 选中元素的**位置、尺寸、样式、层级 z、文本内容**随指令一起交给 AI（不需要截图或复述内容） |
 | **AI 修改方案** | AI 通过 `ppt_canvas_context` 取回选区，产出 `ops` 数组，再用 `ppt_canvas_apply` 落盘；复杂方案可先 `dryRun` 试算 |
 | **实时同步** | 落盘后画布自动刷新到新 rev；AI 刚改动的元素淡黄色呼吸高亮 3 秒（面板每 4 秒轮询 rev） |
@@ -34,7 +34,7 @@
 ### 方式一：安装到当前 profile（推荐）
 
 ```powershell
-node tools/install profile.mjs   profile desktop
+node tools/install-profile.mjs   profile desktop
 ```
 
 脚本做两件幂等的事：在 `~/.dsh/profiles/<profile>/node_modules` 下建一个指向本仓库的
@@ -43,7 +43,7 @@ junction，并把包名加进 profile `package.json` 的 `dsh.profile.bundles`�
 `~/.pnpm/store/v11` link 出来的，pnpm 11 默认找 `%LOCALAPPDATA%\pnpm\store`，
 会以 `ERR_PNPM_UNEXPECTED_STORE` 失败——本插件零依赖，所以直接建 junction 更稳。）
 
-卸载：`node tools/install profile.mjs   profile desktop   uninstall`
+卸载：`node tools/install-profile.mjs   profile desktop   uninstall`
 
 安装后**重启 DSH**（新增 loader 行需要重新 boot）。之后：
 
@@ -54,11 +54,11 @@ junction，并把包名加进 profile `package.json` 的 `dsh.profile.bundles`�
 
 ```powershell
 # Host 路由应在（未重启时会 404）
-curl.exe  s http://127.0.0.1:19387/dsh ppt/api/selftest
+curl.exe -s http://127.0.0.1:19387/dsh ppt/api/selftest
 # 客户端 bundle 应在
-curl.exe  s  o NUL  w "%{http_code}" http://127.0.0.1:19387/plugins/dsh ppt canvas/client.js
+curl.exe -s -o NUL -w "%{http_code}" http://127.0.0.1:19387/plugins/dsh-ppt-canvas/client.js
 # 或者直接跑加载测试
-node tests/host load.test.mjs
+node tests/host-load.test.mjs
 ```
 
 ### 方式二：改客户端即时生效（开发用）
@@ -68,7 +68,7 @@ node tests/host load.test.mjs
 
 ```powershell
 # 改完 client/ 下的源码后同步到 plugin/（内联 CSS + 复制引擎）
-node tools/sync plugin.mjs
+node tools/sync-plugin.mjs
 ```
 
    
@@ -79,10 +79,10 @@ node tools/sync plugin.mjs
 2. 打开文件，三种方式任选：
      **拖拽**：把 `.pptx` 直接拖到面板上（拖进去时整块界面会变蓝并提示）；
      **打开**：点「打开」走系统文件选择（DSH 的目录选择服务，返回绝对路径）；
-     **演示文稿**：打开内置示例（会复制到 `~/.dsh/ppt canvas/`）。
+     **演示文稿**：打开内置示例（会复制到 `~/.dsh/ppt-canvas/`）。
      插件直接读写这个文件，每次修改前自动留档（可撤销）。**建议先备份**。
 3. 选择元素：点选 / `Shift+点击` 多选 / 空白处拖拽框选 / 缩略图「整页」。
-4. 输入指令，`Ctrl+Enter` 发送。例：
+4. 输入指令，回车发送（`Shift+Enter` 换行）。例：
      `把标题改成红色并右对齐`
      `这三个色块统一成品牌蓝 #1A73E8，圆角 8`
      `把这行字缩小到 14px 并居中`
@@ -129,7 +129,7 @@ node tools/sync plugin.mjs
 
 **界面层与宿主解耦。** `client/app.js` 里没有任何 DSH 专有 API：`React` / `ReactDOM`
 由 `plugin/client.js` 从 DSH 的模块表取，`prompt` 走 `session.prompt`，`apiBase` 指向 Host
-通道。`client/app.js` 与 `client/ppt style.js` 在构建时被内联进 `plugin/client.js`。
+通道。`client/app.js` 与 `client/ppt-style.js` 在构建时被内联进 `plugin/client.js`。
 
 关键设计：
 
@@ -167,33 +167,40 @@ node tools/sync plugin.mjs
 ## 🧪 测试
 
 ```powershell
-node tools/test all.mjs
+node tools/test-all.mjs
 ```
 
-四个套件 + 一个同步校验，全绿才算通过（当前 **99 项全绿**）：
+七个套件 + 一个同步校验，全绿才算通过（当前 **122 项全绿**）：
 
 | 套件 | 项数 | 覆盖 |
 |     |     |     |
-| `tests/engine.test.mjs` | 23 | XML 往返、zip 字节级往返、fixture 解析、补丁应用与回读、校验失败不落盘、`dryRun`、撤销/重做字节还原、CJK 空格保真、未触碰页字节不变 |
-| `tests/api.test.mjs` | 22 | 真实 `node:http` 服务器 + 全链路：open → deck → context → apply(dryRun) → apply → history → staleRev → undo/redo → media → selftest → 非 loopback 拒绝 → 坏 JSON |
-| `tests/client-harness.mjs` | 15 | 客户端 bundle 冒烟：经典脚本形态、CSS 与应用层已内联、factory 导出形状、插槽注册、浮窗最小化/展开、标题栏可拖动、无会话时发送按钮禁用、独立窗口入口确已移除 |
+| `tests/engine.test.mjs` | 35 | XML 往返、zip 字节级往返、fixture 解析、补丁应用与回读、校验失败不落盘、`dryRun`、撤销/重做字节还原、CJK 空格保真、未触碰页字节不变、母版文本继承、占位符二级几何继承、文字样式保真（逐段/空行/diff）、fill/line/文本类 op 的能力校验 |
+| `tests/api.test.mjs` | 33 | 真实 `node:http` 服务器 + 全链路：open → deck → context → apply(dryRun) → apply → history → staleRev → undo/redo → media → selftest；外部改动检测与 `staleFile`、并发写、`/api/files`、render 令牌与越界、非 loopback 拒绝、CSRF（来源白名单 + JSON content-type）、坏 JSON |
+| `tests/concurrency.test.mjs` | 8 | 并发 apply 不丢改动、失败不阻断队列、undo 走同一队列、写盘失败不推进游标、包解析缓存失效、context 大小上限、deck LRU |
+| `tests/client-harness.mjs` | 18 | 客户端 bundle 冒烟：经典脚本形态、CSS/应用层内联、factory 导出形状、插槽注册、浮窗最小化/展开、标题栏拖动、无选中时发送禁用、会话菜单能渲染、AI 面板多状态、独立窗口入口确已移除 |
+| `tests/css.test.mjs` | 4 | CSS 模板结构：大括号配对、规则头未被注释/连接符截断、关键规则仍存在、注释成对 |
 | `tests/no-window.test.mjs` | 6 | 独立窗口已移除的回归：窗口模块与 bundle 均已删除、归档文件仍可恢复、host 无窗口路由/启动器残留、面板无入口按钮、`ppt_canvas_window` 已注销、`/api/window` 明确 404 |
-| `tests/host load.test.mjs` | 10 | 安装后加载：`plugin/` 自包含导入、只允许 `./` `node:`、`plugin/index.js` 不得存在（会遮蔽入口）、`apply(ctx)` 装配路由与 4 个工具、缺 `webServer` 时优雅降级、工具可执行、`/api/requests` 诊断、profile 安装位置可解析 |
-| `tools/sync plugin.mjs   check` | — | `plugin/` 是否与 `host/`、`client/` 源同步 |
+| `tests/host-load.test.mjs` | 10 | 安装后加载：`plugin/` 自包含导入、只允许 `./` `node:`、`plugin/index.js` 不得存在（会遮蔽入口）、`apply(ctx)` 装配路由与 4 个工具、缺 `webServer` 时优雅降级、工具可执行、`/api/requests` 诊断、profile 安装位置可解析 |
+| `tests/render.test.mjs` | 8 | LibreOffice 精确渲染：`promoteSlide` 外科式改写（其余部件写盘回读后仍一致）、页号↔部件映射、缓存命中与失效；**未装 LibreOffice 时端到端部分会跳过**（见下） |
+| `tools/sync-plugin.mjs --check` | — | `plugin/` 是否与 `host/`、`client/` 源同步 |
 
-fixture 由 `tools/build demo pptx.py`（python pptx，仅用于造测试素材）+ `tools/demo deck.json` 生成；
+> ⚠️ `render` 的端到端 3 条依赖本机安装 LibreOffice；没有时会打印 skip 并以 0 退出
+> （`test-all` 仍显示 OK）。这是已知的假绿点，尚未加 CI 闸门。
+
+
+fixture 由 `tools/build-demo-pptx.py`（python pptx，仅用于造测试素材）+ `tools/demo-deck.json` 生成；
 插件本身运行时不依赖 Python。
 
 ```powershell
-$py = "C:\Users\Hanson Gao\.dsh\dsh runtimes\dsh primary runtime\dependencies\python\python.exe"
-& $py tools/build demo pptx.py tests/fixtures/demo.pptx
+$py = "C:\Users\Hanson Gao\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+& $py tools/build-demo-pptx.py tests/fixtures/demo.pptx
 ```
 
 诊断：
 
 ```powershell
-node tools/inspect deck.mjs tests/fixtures/demo.pptx          # 打印解析出来的 Deck
-node tools/inspect deck.mjs tests/fixtures/demo.pptx   json   # 完整 JSON
+node tools/inspect-deck.mjs tests/fixtures/demo.pptx          # 打印解析出来的 Deck
+node tools/inspect-deck.mjs tests/fixtures/demo.pptx   json   # 完整 JSON
 ```
 
 运行中自检：`GET http://127.0.0.1:19387/dsh ppt/api/selftest`。
@@ -203,9 +210,9 @@ node tools/inspect deck.mjs tests/fixtures/demo.pptx   json   # 完整 JSON
 ## 📁 目录结构
 
 ```
-dsh ppt canvas/
+dsh-ppt-canvas/
 ├── package.json              # dsh.bundle.patch + dsh.client 声明
-├── cordis.patch.yml          # loader 行：insert id=ppt canvas
+├── cordis.patch.yml          # loader 行：insert id=ppt-canvas
 ├── docs/CONTRACT.md          # 冻结契约：Deck / SelectionElement / Patch / HTTP API
 ├── host/                     # Host 引擎（真源）
 │   ├── index.js              # 插件入口：装配独立服务、宿主路由与模型工具
@@ -227,7 +234,7 @@ dsh ppt canvas/
 ├── plugin/                   # 随包分发目录（DSH 真正加载这里）
 │   ├── host.js               # 入口（host/index.js 的逐字节副本）
 │   ├── client.js             # 客户端 bundle（含内联 CSS + 界面层）
-│   ├── *.js / *.cjs          # 由 tools/sync plugin.mjs 从 host/ 同步
+│   ├── *.js / *.cjs          # 由 tools/sync-plugin.mjs 从 host/ 同步
 │   └── assets/demo.pptx      # 内置演示文稿
 ├── archive/standalone-window/ # 已移除的独立窗口功能（源文件 + 恢复说明）
 ├── tools/
@@ -236,7 +243,7 @@ dsh ppt canvas/
 │   ├── build client.mjs      # client bundle 的内联生成
 │   ├── test all.mjs          # 跑全部测试
 │   ├── build demo pptx.py    # fixture 生成（仅测试用）
-│   ├── demo deck.json        # fixture 设计稿
+│   ├── demo-deck.json        # fixture 设计稿
 │   └── inspect deck.mjs      # 打印 Deck 模型
 └── tests/
     ├── engine.test.mjs

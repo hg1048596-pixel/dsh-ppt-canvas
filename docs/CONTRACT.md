@@ -57,12 +57,13 @@
   "geometry": { "x": 60, "y": 40, "w": 840, "h": 120, "rotation": 0, "flipH": false, "flipV": false },
   "placeholder": null,   // 非占位符为 null，否则 { "idx": "0", "type": "title" }
   "style": {
-    "fill": { "type": "solid", "color": "#1F4E79", "alpha": 1 },
+    "fill": { "type": "solid", "color": "#1F4E79" },
     // type: solid | gradient | none | image | inherit
+    // 注意：**没有 alpha 字段** —— 颜色统一 #RRGGBB，透明度目前不解析。
     "gradient": null,    // { "angle": 90, "stops": [{ "pos": 0, "color": "#FFF" }, ...] }
     "line": { "color": "#333333", "width": 1, "dash": "solid" },   // 可为 null
     "shadow": false,
-    "opacity": 1,
+    "opacity": 1,        // 恒为 1（未解析 a:alpha，保留字段仅为契约稳定）
     "cornerRadius": 0,   // px；roundRect/ellipse 的圆角半径，Client 用它做圆角
     "prst": "rect"       // a:prstGeom/@prst 原始值，诊断用
   },
@@ -107,7 +108,8 @@
   "requestId": "req_1729140000000_ab12",   // 客户端生成
   "deckRev": 7,
   "instruction": "把标题改成红色并右对齐",     // 用户自然语言指令原文
-  "selectionMode": "multi",                 // single | multi | marquee | slide
+  "selectionMode": "multi",                 // 客户端目前**只发** single | multi
+                                            // （marquee / slide 尚未实现，保留名称不代表会产出）
   "slideIndex": 0,
   "selectedIds": ["s1:5", "s1:7"],
   "elements": [ /* SelectionElement[] 见 §4，由客户端截取 */ ],
@@ -224,18 +226,24 @@
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `ppt_canvas_open` | `{ "path": string }` | `{ path, rev, slideCount }` |
-| `ppt_canvas_context` | `{ "requestId": string }` | §3 的完整上下文（含元素属性 + 用户指令） |
+| `ppt_canvas_open` | `{ "path": string }` | `{ file, rev, slideCount, slideSize: {w,h}, shapes: [{index,name,shapeCount}] }` |
+| `ppt_canvas_context` | `{ "requestId": string }` | `{ context: §3 的完整上下文, guidance: 生成 patch 的提示 }` |
 | `ppt_canvas_apply` | `{ "patch": §5, "dryRun"?: boolean, "requestId"?: string }` | `ApplyResult`（不带 deck） |
 | `ppt_canvas_history` | `{ "action": "undo"\|"redo"\|"status", "steps"?: number }` | `Deck` 摘要 / 历史状态 |
 
 ## 8. 客户端动作语义
 
-- **选择**：点击元素 = 单选；`Shift/Ctrl + 点击` = 增删多选；空白处拖拽 = 框选（marquee，相交即选中）；点击页面缩略图左上角 = 整页选中（`selectionMode: "slide"`）。
-- **高亮**：选中 = 2px 主色描边 + 8% 主色填充 + 四角把手；悬停 = 1px 虚线；AI 刚改动的元素 = 3 秒淡黄色 `#FFE58F` 呼吸高亮。
-- **指令**：`Enter` = 把指令加入待发列表（不发送）；`Ctrl/Cmd + Enter` = 发送。发送即 `sessions.binding(sessionId).session.prompt([{type:'text',text}], 'queue')`。
+- **选择**：点击元素 = 单选；`Shift/Ctrl + 点击` = 增删多选；空白处拖拽 = 框选（相交即选中）；点击页面缩略图左上角 = 整页选中。
+  发送上下文时 `selectionMode` 目前只有 `single` / `multi` 两个值（框选与整页选中尚未映射到独立取值）。
+- **高亮**：选中 = 2px 主色描边 + 8% 主色填充 + 四角把手；悬停 = 1px 虚线；AI 刚改动的元素 = 3 秒淡黄色 `#FFE58F` 呼吸高亮
+  （客户端通过**自己 diff 前后两份 Deck** 得出改动集合 —— AI 走宿主工具写文件，客户端拿不到 apply 的 `changedIds`）。
+- **指令**：`Enter` = **发送**；`Shift + Enter` = 换行；`Ctrl/Cmd + Enter` = 也发送。
+  待发列表用「加入待发」按钮显式添加（用户明确要求 Enter 的优先级高于加入待发）。
+  发送链路是 `sessions.retain(id,{source})` → `reference.ready` → `binding.session.prompt([{type:'text',text}], 'queue')` → `reference.release()`。
 - **撤销/重做**：`Ctrl+Z` / `Ctrl+Shift+Z` 走 Host 历史（写盘级），本地乐观预览在写盘成功后以 Host 返回的 Deck 为准（三方同步以 Host 为唯一权威）。
 - **同步**：写盘成功后 Client 必须用返回的 Deck 覆盖本地模型；`rev` 不一致时以 Host 的 `rev` 为准并丢弃本地乐观状态。
+- **外部改动**：Client 轮询 `GET /api/status`，`changed=true`（磁盘 mtime 变了，例如 PowerPoint 保存过）时**自动重载**；就地编辑中只提示不打断。
+
 
 ## 9. 错误处理
 
