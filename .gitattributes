@@ -1,0 +1,25 @@
+# 统一换行符：文本文件一律以 LF 存放与检出。
+#
+# 为什么需要这一条：Windows 上 git 默认 core.autocrlf=true，会把源码检出成 CRLF。
+# 而本仓库的 tools/sync-plugin.mjs 是**逐字节**比较 plugin/ 与源码构建结果的，
+# 构建又会把源码原样内联进 plugin/client.js —— 一旦检出成 CRLF，任何干净克隆
+# 都会报 "plugin/client.js is out of date"，构建产物也不可复现。
+# 显式声明 eol=lf 后，属性优先于 core.autocrlf，各平台检出结果一致。
+* text=auto eol=lf
+
+# 二进制：不做任何换行符转换与文本合并
+*.pptx binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.zip  binary
+
+# 以下文件按文本处理但绝不转换（它们是构建/测试的比对基准）
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.cjs  text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.md   text eol=lf
