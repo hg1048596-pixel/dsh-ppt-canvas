@@ -384,8 +384,9 @@ async function handlePost(name, body, store, bus) {
     case 'redo':
       return store.redo(body.steps)
     case 'close': {
-      store.current = null
-      return { closed: true }
+      // 走 store.close()：它还会释放历史快照（每步两份完整 pptx）与内存缓存。
+      // 以前只把 current 置空，磁盘快照和 buffer 全都留着。
+      return store.close()
     }
     default:
       throw new DeckError('notFound', `unknown api ${name}`)

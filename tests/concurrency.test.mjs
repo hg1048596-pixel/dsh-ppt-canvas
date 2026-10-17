@@ -8,12 +8,13 @@
 //
 // 用法：<node> tests/concurrency.test.mjs
 
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { DeckStore } from '../host/deck-store.js'
+import { snapshotDir as snapshotDirOf } from '../host/history.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const FIXTURE = join(HERE, 'fixtures', 'demo.pptx')
@@ -162,6 +163,32 @@ await check('打开过多文档时按 LRU 淘汰（decks 不再无限增长）',
   // 当前文档不能被淘汰
   assert(localStore.current !== null, 'current 必须保留')
   assert(localStore.decks.has(localStore.current.filePath), 'current 必须在 decks 里')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+await check('close() 释放历史快照与内存缓存（以前只把 current 置空）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ppt-close-'))
+  const file = join(dir, 'close.pptx')
+  copyFileSync(FIXTURE, file)
+  const localStore = new DeckStore()
+  await localStore.open(file)
+  const shape = localStore.view().slides[0].shapes.find(item => item.kind !== 'group')
+  await localStore.apply({ summary: '写一笔', ops: [{ op: 'setFill', id: shape.id, color: '#445566' }] })
+
+  const snapshotDir = snapshotDirOf(file)
+  assert(existsSync(snapshotDir), '应用补丁后应存在历史快照目录')
+  assert(localStore.decks.size > 0, '打开后 decks 应有记录')
+
+  const result = localStore.close()
+  assertEqual(result.closed, true)
+  assertEqual(result.released, true, '应报告已释放')
+  assertEqual(localStore.current, null, 'current 应被清空')
+  assertEqual(localStore.decks.size, 0, 'decks 缓存应被清空')
+  // 快照目录里的文件应被删除（目录本身可能还在，但不应再有 .pptx）
+  if (existsSync(snapshotDir)) {
+    const left = readdirSync(snapshotDir).filter(name => name.endsWith('.pptx'))
+    assertEqual(left.length, 0, `历史快照应被删除，仍剩 ${left.length} 个`)
+  }
   rmSync(dir, { recursive: true, force: true })
 })
 

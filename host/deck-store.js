@@ -504,6 +504,24 @@ export class DeckStore {
     return this.history.status(open.filePath)
   }
 
+  /**
+   * 关闭当前文档。
+   *
+   * 不只是把 current 置空：还要**释放磁盘上的历史快照**（每步两份完整 pptx，
+   * 一份 80MB 的文稿编辑 50 步就有约 8GB）以及内存缓存。
+   * 以前 /api/close 只做了 `store.current = null`，快照与 buffer 全都留着。
+   */
+  close() {
+    const open = this.current
+    if (open === null) return { closed: true, released: false }
+    try {
+      this.history.forget(open.filePath)
+    } catch { /* 清理失败不影响关闭 */ }
+    this.decks.delete(open.filePath)
+    this.current = null
+    return { closed: true, released: true, file: open.filePath }
+  }
+
   // ---------------------------------------------------------------- AI 上下文
 
   /**
