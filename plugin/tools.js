@@ -29,12 +29,62 @@ const PATCH_SCHEMA_NOTE = [
   'id 必须来自 ppt_canvas_context 返回的 elements[].id。',
 ].join('\n')
 
+// —— 参数简写 → 模型 API 认的 JSON Schema ——
+//
+// 宿主的 tools.register() 对 parameters 是**原样透传**（它不同于 defineTool：
+// 后者才会调用 parameterSchemaSpecToJsonSchema 把简写编译成
+// { type:'object', properties, required }）。所以直接写 { path: {...} } 这种属性简写，
+// 模型 API 收到的根节点就没有 type，整轮请求被拒：
+//   Invalid schema for function 'ppt_canvas_apply':
+//   schema must be a JSON Schema of 'type: "object"', got 'type: null'.
+// 简写里的 `required: true` 标记同理必须上提成父级的 required 数组 ——
+// 属性自己的 schema 里不能出现布尔 required。
+function compileSchema(node) {
+  if (Array.isArray(node)) return node.map(compileSchema)
+  if (node === null || typeof node !== 'object') return node
+  const compiled = {}
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'required' && value === true) continue // 交给父级 compileProperties 收集
+    if (key === 'properties' && value !== null && typeof value === 'object') {
+      const holder = compileProperties(value)
+      compiled.properties = holder.properties
+      if (holder.required !== undefined) compiled.required = [...(compiled.required ?? []), ...holder.required]
+      continue
+    }
+    if (key === 'items') { compiled.items = compileSchema(value); continue }
+    compiled[key] = value
+  }
+  return compiled
+}
+
+function compileProperties(propertyMap) {
+  const properties = {}
+  const required = []
+  for (const [name, spec] of Object.entries(propertyMap)) {
+    if (spec !== null && typeof spec === 'object' && spec.required === true) required.push(name)
+    properties[name] = compileSchema(spec ?? {})
+  }
+  return required.length === 0 ? { properties } : { properties, required }
+}
+
+function parameterSchema(propertyMap) {
+  if (propertyMap === undefined || propertyMap === null) return { type: 'object', properties: {} }
+  return { type: 'object', ...compileProperties(propertyMap) }
+}
+
 /**
  * @param {object} tools  DSH 的 tools 服务（ctx.get('tools')）
  * @param {import('./deck-store.js').DeckStore} store
  */
 export function registerTools(tools, store, bus, logger) {
   const disposers = []
+
+  // 所有工具统一在注册出口编译参数简写：下面四个 definition 仍按简写书写，
+  // 但真正进宿主注册表（进而发给模型 API）的 parameters 一定是对象根 schema。
+  const register = tools.register.bind(tools)
+  tools = {
+    register: definition => register({ ...definition, parameters: parameterSchema(definition.parameters) }),
+  }
 
   disposers.push(tools.register({
     name: 'ppt_canvas_open',

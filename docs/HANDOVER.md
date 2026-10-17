@@ -52,11 +52,20 @@
    `NODE_OPTIONS` 会让 Electron 以纯 Node 模式启动即退（无窗口无报错）。
 3. **`inject` 数组会让插件永久挂起**（历史事故）。`host/index.js` 保持 `inject=[]`。
 4. **CSS 是普通字符串，语法错误完全静默**（`tests/css.test.mjs` 守着）。
-5. **模型 API 的 function schema 按严格模式写**（2026-10-15 两轮实测）：
+5. **模型 API 的 function schema 按严格模式**（2026-10-15 两轮实测）：
    - 参数不能用 `type:'json'`（编译成无 type 节点，API 报 `got 'type: null'`）
    - **布尔 `additionalProperties: true` 也会被 API 拒**（同样报 type: null）——
      必须**完整声明 properties + `additionalProperties: false`**，数组 items 内不放 `required`
+   - 根节点必须是 `type: 'object'`
+   - **`host/tools.js` 里现在有两条写法，别混**：
+     - `ppt_canvas_apply` 的 `patch` 是**手写完整 schema**（嵌套 `additionalProperties:false` 全显式）
+     - 其余三个工具的 `parameters` 写**简写**（`{ path: {type:'string'} }`、属性里 `required:true`），
+       由 `registerTools` 出口的 `parameterSchema()`/`compileSchema()` **编译**成合法 JSON Schema
+       （`host/tools.register` 对 parameters 是**原样透传**，不编译 —— 简写直传会让根节点没有 type 而被 API 拒）
+     - 简写里的 `required: true` 会被上提成父级 `required` 数组；**属性自己的 schema 里不能留布尔 required**
    - 验证只看 `health.toolRegistration`（**不要**用 `Tool.listTools`，它只返回 Agent 可见的工具）
+   - 快速自检（不重启也能验）：用一个只收集的桩跑 `registerTools`，打印各工具的
+     `parameters.type` / `required` / `properties` 数量，见 7 节命令
 
 ### 2.2 宿主能力：实测「有」与「没有」
 
@@ -86,11 +95,16 @@ $dev  = "D:\deepseek harness plugin\dsh-ppt-canvas"
 & $node "$dev\tools\sync-plugin.mjs"          # 改完源码必须跑
 & $node "$dev\tools\inspect-deck.mjs" <deck.pptx> [--json]
 & $node "$dev\tools\probe-xml.mjs" <deck.pptx> <匹配文本> [slideN]
+& $node "$dev\tools\probe-runs.mjs" <deck.pptx> <slideN> <形状名片段>   # 逐 run dump 样式
+& $node "$dev\tools\probe-damage.mjs" <deck.pptx>                    # 扫可疑字号切分
 & $node "$dev\tools\debug-copy.mjs"           # 复制当前文档到 debug/ 供诊断
 
 # 诊断插件装配（重启 DSH 后看这个）
 (Invoke-WebRequest "http://127.0.0.1:19488/dsh-ppt/api/requests" -UseBasicParsing).Content
 # → health.toolRegistration 应为 "ok"，4 个工具
+
+# 不重启验证 schema 是否合法（用一个只收集不注册的桩）
+& $node --input-type=module -e "const m=await import('file:///D:/deepseek%20harness%20plugin/dsh-ppt-canvas/host/tools.js');const c=[];m.registerTools({register:d=>{c.push(d);return()=>{}}},{},{emit(){}},{info(){},warn(){}});for(const d of c)console.log(d.name.padEnd(22),'type='+d.parameters.type,'required='+JSON.stringify(d.parameters.required??null))"
 ```
 
 **当前测试基线（全绿）：**
@@ -249,14 +263,28 @@ op 里显式给的样式字段（color/fontSize/…）一律优先于映射结�
 
 ## 6. 已知问题与未完成项（★ 接手重点）
 
-### 6.1 用户文件里的既有损伤（★ 先处理）
+### 6.1 ~~用户文件里的既有损伤~~ → 已核实为**误判**（2026-10-17 复核）
 
-逐字符偏移映射的错误版本曾把损伤写进用户文件（已修复算法，但**字节不会自愈**）：
+上一版这里写着「损坏写进了用户文件，需修复」。**经复核，该结论不成立**，证据如下（全部可复现）：
 
-- **第 7 页 `textbox 132`**：p1 出现 36/32 的随意切分；p3 是 "'Automated't o      'Autonomous'." 状的乱串
-- **第 10 页 `textbox 176`**：p1 在 "machines" 与 "from" 之间被切成 41.33 / 37.33 两段
+| 检查 | 结果 | 含义 |
+|---|---|---|
+| `debug/repro.pptx`（10-15 00:52 副本）与 `C:\Users\Hanson Gao\Desktop\Industrial_Agents_Cognitive_Manufacturing.pptx` 的 SHA256 | **完全相同** | 自副本以来文件未被写过 |
+| 桌面原件文件系统 mtime | **2026-02-04 20:10**（10 月从未变过） | `writeAtomic` 用 `writeFile`+`rename`、**不保留 mtime**，写过就必然是 10 月 |
+| 撤销历史快照目录是否有该文件的 key（`8f70718f52d8`） | **没有**（目录里只有 4 个别的 key） | 历史在首次落盘时创建；没有 = 从没 apply 过补丁 |
+| 文本层面 | p3 的 `'t o`（多出空格）、p1 的 `technologies   enables` | 样式边界 bug **只改字符归属哪个 run，不会增删字符** |
 
-处理方式：用户手动改回，或用户提供正确文案后代为恢复。**先问用户要不要处理。**
+即：`textbox 132` / `textbox 176` 里那些「同段多字号」是**作者原始排版**（p7 run5-8 是作者把半句调成 32，
+p10 同理），`'Automated't o` 这类是**作者原始笔误**，都早于插件存在。
+
+> ⚠️ 试过但**无效**的判据（避免下一位重复走）：ZIP 条目时间戳。我们的 `writeZip` 固定写
+> `DOS_DATE=0x0021`（1980-01-01，为了确定性输出），与 PowerPoint 自己写的值相同，**无法区分**。
+> 判断「文件有没有被我们写过」用上面三条（哈希 / mtime / 历史快照），不要用 ZIP 时间。
+
+**结论：不需要处理，也不要再向用户提「修你文件里的损伤」** —— 那是他原本的内容。
+若用户主动说某处文字不对，按正常改字流程处理即可。
+
+复核工具：`tools/probe-damage.mjs`（扫可疑切分）、`tools/probe-runs.mjs`（逐 run dump 样式）。
 
 ### 6.2 架构边界（与原生 PPT 的差距，已向用户如实说明）
 
