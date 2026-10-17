@@ -117,7 +117,7 @@ $dev  = "D:\deepseek harness plugin\dsh-ppt-canvas"
 **当前测试基线（全绿）：**
 
 ```
-engine 35 | concurrency 4 | api 33 | client 18 | css 4 | no-window 6 | host-load 10 | render 8 | sync OK
+engine 37 | concurrency 9 | api 33 | client 18 | css 4 | no-window 6 | host-load 10 | render 8 | sync OK（共 125 项）
 ```
 
 > 注意 `render` 的端到端 3 条**需要装有 LibreOffice**；没装时该套件会打印 skip 并以 0 退出
