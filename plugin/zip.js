@@ -269,7 +269,7 @@ export function writeZip(entries, opts = {}) {
     if (verbatim === null && data === undefined) {
       throw fail('badRequest', `entry ${entry.name} needs data (or raw + method)`)
     }
-    plan.push({ name: entry.name, data, method, verbatim, crc: entry.crc32 })
+    plan.push({ name: entry.name, data, method, verbatim, crc: entry.crc32, usize: entry.usize })
   }
 
   const chunks = []
@@ -281,7 +281,14 @@ export function writeZip(entries, opts = {}) {
   for (const item of plan) {
     let method = item.method
     let payload = item.verbatim
-    let usize = item.data === undefined ? undefined : item.data.length
+    // 未压缩大小：有 data 就直接取长度；「原样复制」的条目必须由调用方显式给出
+    // （压缩数据本身不含这个信息）。少了它中央目录会写 0，产出的包自己都读不回来。
+    let usize = item.data === undefined
+      ? (Number.isFinite(item.usize) ? item.usize : undefined)
+      : item.data.length
+    if (payload !== null && !Number.isFinite(usize)) {
+      throw fail('badRequest', `entry ${item.name} uses raw copy but gives no usize`)
+    }
 
     if (payload === null) {
       if (method === undefined) {

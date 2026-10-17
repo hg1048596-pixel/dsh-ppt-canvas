@@ -567,6 +567,35 @@ check('zip: 解压预算存在（防 zip 炸弹）', () => {
   assert(src.includes('maxOutputLength'), 'inflateRawSync 必须传 maxOutputLength')
 })
 
+check('patch: 未触碰部件的**压缩字节**原样复制（不再全包重新压缩）', () => {
+  // 以前 applyPatch 用 readZip（解压后的 Map）再 writeZip({name,data})，
+  // 每个条目都会被重新 deflate —— 一份 80MB 的文稿每次编辑都全包重压缩。
+  // 现在未修改的条目走 raw + method + usize + crc32 原样复制。
+  const before = readFileSync(deckPath)
+  const beforeEntries = new Map(readZipEntries(before).map(entry => [entry.name, entry]))
+  const deck = readDeck(before, deckPath, 0)
+  const shape = deck.slides[0].shapes.find(item => item.kind === 'shape' || item.kind === 'text')
+  const result = applyPatch(before, deck, deckPath, {
+    summary: '只改一个形状的填充',
+    ops: [{ op: 'setFill', id: shape.id, color: '#0F0F0F' }],
+  }, {})
+
+  const afterEntries = new Map(readZipEntries(result.buffer).map(entry => [entry.name, entry]))
+  const touchedName = 'ppt/slides/slide1.xml'
+  let compared = 0
+  let differ = []
+  for (const [name, entry] of beforeEntries) {
+    if (name === touchedName) continue
+    const next = afterEntries.get(name)
+    if (next === undefined) continue
+    compared += 1
+    // 比较**压缩后的原始字节**：这才是「原样复制」的直接证据
+    if (Buffer.compare(Buffer.from(entry.raw), Buffer.from(next.raw)) !== 0) differ.push(name)
+  }
+  assert(compared > 10, `应有大量未触碰部件参与比较，实际 ${compared}`)
+  assertEqual(differ.length, 0, `未触碰部件的压缩字节必须完全一致，但以下被重压缩了：${differ.slice(0, 3).join(', ')}`)
+})
+
 // ---------------------------------------------------------------- 补丁
 
 check('patch: 混合补丁应用后回读一致', () => {

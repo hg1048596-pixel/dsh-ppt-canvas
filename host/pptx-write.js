@@ -12,7 +12,7 @@
 //    所以这里总是「清空后按顺序重写」而不是就地替换。
 //  - duplicate 必须分配新的 p:cNvPr/@id：同一 slide 内 id 重复会让 PowerPoint 报错修复。
 
-import { readZip, writeZip } from './zip.js'
+import { readZip, readZipEntries, writeZip } from './zip.js'
 import {
   parseXml, serializeXml, childrenOf, childOf, findAll, findFirst, textOf, getAttr, setAttr,
   createElement, appendChild, insertBefore, removeChild, removeChildren, cloneElement,
@@ -847,7 +847,23 @@ export function applyPatch(buffer, deck, filePath, rawPatch, options = {}) {
     throw new PatchError('validationFailed', `patch validation failed with ${violations.length} violation(s)`, { violations })
   }
 
-  const entries = readZip(buffer)
+  // 用 readZipEntries 而不是 readZip：前者保留每个条目的**原始压缩字节与压缩方法**，
+  // 未修改的部件写回时可以原样复制（verbatim），不必重新压缩。
+  // 一份 80MB 的文稿每次编辑都全包 deflate 是很贵且完全没必要的。
+  const richEntries = readZipEntries(buffer)
+  const entries = new Map()
+  const verbatimOf = new Map()
+  for (const entry of richEntries) {
+    entries.set(entry.name, Buffer.from(entry.data))
+    if (entry.raw !== undefined) {
+      verbatimOf.set(entry.name, {
+        raw: Buffer.from(entry.raw),
+        method: entry.method,
+        usize: entry.usize,
+        crc32: entry.crc32,
+      })
+    }
+  }
   const slideIdToPart = new Map()
   for (const part of [...entries.keys()]) {
     const match = /^ppt\/slides\/slide(\d+)\.xml$/.exec(part)
@@ -1141,7 +1157,15 @@ export function applyPatch(buffer, deck, filePath, rawPatch, options = {}) {
   for (const partName of touchedParts) {
     entries.set(partName, Buffer.from(serializeXml(parsedParts.get(partName)), 'utf8'))
   }
-  const out = writeZip([...entries.entries()].map(([name, data]) => ({ name, data: Buffer.from(data) })))
+  // 未触碰的部件走**原样复制**（raw + method），只有改动过的部件重新压缩。
+  // 一份 80MB 文稿每次编辑都全包 deflate 既慢又毫无必要。
+  const out = writeZip([...entries.entries()].map(([name, data]) => {
+    const original = verbatimOf.get(name)
+    if (!touchedParts.has(name) && original !== undefined) {
+      return { name, raw: original.raw, method: original.method, usize: original.usize, crc32: original.crc32 }
+    }
+    return { name, data: Buffer.from(data) }
+  }))
   return { buffer: out, changedIds: [...changed], ops: results, warnings }
 }
 
