@@ -38,6 +38,13 @@
 
 ### 2.1 五个必须知道的坑
 
+> ⚠️ **写操作的四条不变量**（2026-10-17 审计补，改动 deck-store 前必读）：
+> 1. apply/undo/redo 都走 `enqueueMutation`（串行）；
+> 2. 入队前捕获目标 `open`，回调里校验 `this.current === open`（否则 `staleDeck`）；
+> 3. 落盘前 `assertUnchangedOnDisk`（否则 `staleFile`），且**必须在动 history 游标之前**；
+> 4. 外部 mtime 变化后 `open()` 会 `history.reset`，避免撤销写回旧快照。
+
+
 1. **`plugin/index.js` 绝对不能存在**（历史事故：目录包解析优先命中旧副本且无报错）。
    `tools/sync-plugin.mjs` 会主动删除它。
 2. **改 host 代码必须重启 DSH**（HMR 忽略 node_modules）。client 改动刷新页面即可。
@@ -110,11 +117,27 @@ $dev  = "D:\deepseek harness plugin\dsh-ppt-canvas"
 **当前测试基线（全绿）：**
 
 ```
-engine 28 | api 24 | client 18 | css 4 | no-window 6 | host-load 10 | render 7 | sync OK
+engine 31 | concurrency 4 | api 30 | client 18 | css 4 | no-window 6 | host-load 10 | render 8 | sync OK
 ```
 
-engine 里 3 个用例守着**文字样式保真管线**（本任期的核心修复，不要删）：
-逐段样式沿用 + 空行不带 run + 逐字符 diff 映射（见 5.5）。
+> 注意 `render` 的端到端 3 条**需要装有 LibreOffice**；没装时该套件会打印 skip 并以 0 退出
+> （`test-all` 仍显示 OK）—— 这是已知的假绿点，尚未加 CI 闸门。
+
+engine 里 3 个用例守着**文字样式保真管线**（逐段样式沿用 + 空行不带 run + 逐字符 diff 映射，见 5.5）；
+另有 2 条守**母版继承**、1 条守**占位符二级几何继承**、2 条守**带 `<p:ph>` 的课件能读**。
+
+**2026-10-17 审计后新增的机制（务必先读）：**
+
+| 机制 | 位置 | 要点 |
+|---|---|---|
+| 外部改动检测 | `GET /api/status` + `deck.fileMtimeMs` | 客户端每 4s 轮询；`changed=true` 自动 `deck{force:true}` 重载。**外部保存不会改宿主 rev**，所以判据是 mtime 不是 rev |
+| 写入守卫 `staleFile` | `deck-store.assertUnchangedOnDisk` | apply/undo/redo 落盘前比对 mtime；文件被 PowerPoint 保存过就拒绝写入（409），不覆盖别人的修改 |
+| 排队绑定 `staleDeck` | `deck-store.apply/undo/redo` | 入队前捕获目标文档；排队期间 `/api/open` 换了文档就放弃本次写入（否则会写到另一份文件上） |
+| 写操作串行化 | `deck-store.enqueueMutation` | apply/undo/redo 串行执行，防 lost update（并发双写会丢改动、历史出现重复 rev） |
+| CSRF 两道闸 | `api.js isAllowedOrigin` + `hasJsonContentType` | 非白名单 Origin 一律 403；POST 必须 `application/json`（强制浏览器走预检）。**只省 CORS 头挡不住副作用** |
+| 占位符几何继承 | `pptx-read.readLayoutPlaceholders` | slideLayout → slideMaster 两级。真实 PPT 的占位符`<p:spPr/>` 没有 `a:xfrm` |
+| 面板错误条 | `app.js` `.dsh-ppt-errorbar` | `state.error` 常驻可见（不是 6s 消失的 toast） |
+
 
 ---
 

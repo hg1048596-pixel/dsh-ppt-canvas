@@ -79,7 +79,9 @@
       { "level": 0, "align": "center",
         "lnSpc": 1.25,                  // 行距；倍数（lnSpcIsPx=false）或绝对 px（lnSpcIsPx=true）
         "lnSpcIsPx": false,
-        "spaceBefore": null,            // 段前间距 px（a:spcBef/a:spcPts），没有就是 null
+        "spaceBefore": null,            // 段前间距 px（a:spcBef/**a:spcPts**），没有就是 null
+        "spaceBeforePct": null,         // 段前间距比例（a:spcBef/**a:spcPct**，0.2 = 20%）
+        "spaceAfterPct": null,          // 段后间距比例（同上，相对字号）
         "spaceAfter": null,             // 段后间距 px（a:spcAft/a:spcPts）
         "indent": null,                 // 左缩进 px（a:pPr/@marL）
         "runs": [
@@ -167,18 +169,34 @@
 ## 6. HTTP API（Host，同源，前缀 `/dsh-ppt`）
 
 所有响应：`{ "ok": true, "value": <T> }` 或 `{ "ok": false, "error": { "code": "...", "message": "...", "details": {...} } }`。
-错误码：`badRequest` / `notFound` / `noDeck` / `validationFailed` / `staleRev` / **`staleFile`** / `ioFailed` / `internal`。
 
-`staleFile`（409）：**磁盘上的文件已被其他程序改过**（例如 PowerPoint 保存过），
-写入被中止以免覆盖那部分修改。客户端应重载后再试（`POST /api/deck {force:true}`）。
-`staleRev`（409）指的是「指令捕获后宿主内存里的 rev 变了」，两者不同。
+错误码与 HTTP 状态：
+
+| code | HTTP | 含义 |
+|---|---|---|
+| `badRequest` | 400 | 参数/JSON 非法（POST 还要求 `content-type: application/json`，否则 415） |
+| `forbiddenOrigin` | 403 | `Origin` 不在白名单（`dsh-app://*` 或 loopback）；CSRF 防护 |
+| `notFound` | 404 | 文件/元素/媒体不存在 |
+| `noDeck` | 409 | 还没有打开任何演示文稿 |
+| `validationFailed` | 422 | 补丁校验失败，`details.violations` 逐条给出 |
+| `staleRev` | 409 | 指令捕获后**宿主内存**里的 rev 变了（重新发送即可） |
+| `staleFile` | 409 | **磁盘文件被外部程序改过**（如 PowerPoint 保存）；写入已中止，请重载 |
+| `staleDeck` | 409 | 排队期间**文档被切换**；本次写入已放弃 |
+| `nothingToUndo` / `nothingToRedo` | 409 | 撤销/重做栈空 |
+| `ioFailed` | 500 | 读写磁盘失败 |
+| `internal` | 500 | 未分类 |
+| `rendererMissing` / `renderFailed` | 500 | 精确渲染失败（未装 LibreOffice、转换失败） |
 
 | method | path | body | value |
 |---|---|---|---|
 | POST | `/dsh-ppt/api/open` | `{ "path": "D:/x.pptx", "createDemo": false }` | `Deck`(§1) |
 | POST | `/dsh-ppt/api/demo` | `{ "dir": "D:/tmp" }`（可省） | `Deck` |
+| POST | `/dsh-ppt/api/files` | `{ "files": [{ "name": "x.pptx", "content": "<base64>" }] }` | `Deck`（落到托管目录再打开） |
 | POST | `/dsh-ppt/api/deck` | `{ "force": true }`（可省；force 才重读磁盘） | `Deck` |
+| POST | `/dsh-ppt/api/close` | — | `{ ok }` |
 | GET  | `/dsh-ppt/api/status` | — | `{ file, rev, mtimeMs, openedMtimeMs, changed }` |
+| GET  | `/dsh-ppt/api/render?page=N&w=1600` | — | `image/png`（LibreOffice 精确渲染） |
+| GET  | `/dsh-ppt/api/requests` | — | 诊断：最近请求 + `health`（工具注册状态） |
 | POST | `/dsh-ppt/api/context` | §3 | `{ "requestId": "...", "context": <原文> }` |
 | GET  | `/dsh-ppt/api/context?requestId=...` | — | `{ "context": <原文>, "consumed": bool }` |
 | POST | `/dsh-ppt/api/apply` | `{ "patch": §5, "dryRun": true, "source": "ai"\|"user", "requestId": "..." }` | `ApplyResult` |
