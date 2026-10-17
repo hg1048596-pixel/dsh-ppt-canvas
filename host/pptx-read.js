@@ -10,7 +10,7 @@
 
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
-import { readZip } from './zip.js'
+import { readZipEntries } from './zip.js'
 import {
   parseXml, findAll, findFirst, childrenOf, childOf, textOf, getAttr, isElement,
 } from './xml.js'
@@ -957,7 +957,22 @@ function readShape(container, context) {
  * @param {Buffer} buffer
  */
 export function loadPackage(buffer) {
-  const entries = readZip(buffer)
+  // 用 readZipEntries 一次拿到「解压后的数据 + 原始压缩字节」：
+  // 数据给解析用，原始字节给**写回时原样复制**用（渲染暂存包不再全量重压缩）。
+  const rich = readZipEntries(buffer)
+  const entries = new Map()
+  const rawOf = new Map()
+  for (const entry of rich) {
+    entries.set(entry.name, Buffer.from(entry.data))
+    if (entry.raw !== undefined) {
+      rawOf.set(entry.name, {
+        raw: Buffer.from(entry.raw),
+        method: entry.method,
+        usize: entry.usize,
+        crc32: entry.crc32,
+      })
+    }
+  }
   const warnings = []
   const presentationBytes = entries.get('ppt/presentation.xml')
   if (presentationBytes === undefined) throw new Error('not a presentation: ppt/presentation.xml is missing')
@@ -1019,7 +1034,7 @@ export function loadPackage(buffer) {
       )
     }
   } catch { /* 统计失败不影响读取 */ }
-  return { entries, slideParts, theme, media, warnings, slideWidthEmu, slideHeightEmu }
+  return { entries, rawOf, slideParts, theme, media, warnings, slideWidthEmu, slideHeightEmu }
 }
 
 /**

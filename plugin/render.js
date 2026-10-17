@@ -139,7 +139,7 @@ function runSoffice(soffice, args, timeoutMs) {
  * @param {object} [options.logger]
  * @returns {Promise<{ buffer: Buffer, cached: boolean, ms: number }>}
  */
-export async function renderSlidePng({ file, entries, page, width = 1600, slideParts, logger }) {
+export async function renderSlidePng({ file, entries, page, width = 1600, slideParts, rawOf, logger }) {
   const soffice = findSoffice()
   if (soffice === null) {
     const error = new Error('没有找到 LibreOffice，无法做精确渲染')
@@ -178,7 +178,18 @@ export async function renderSlidePng({ file, entries, page, width = 1600, slideP
 
   const promoted = promoteSlide(entries, page, slideParts)
   const { writeZip } = await import('./zip.js')
-  const buffer = writeZip(promoted.order.map(name => ({ name, data: promoted.entries.get(name) })))
+  // 暂存包也走**原样复制**：未修改的部件不必重新 deflate。
+  // 只有被提升的那个 slide（以及它的 rels）会换成新内容。
+  const TARGET_SLIDE = 'ppt/slides/slide1.xml'
+  const TARGET_RELS = 'ppt/slides/_rels/slide1.xml.rels'
+  const buffer = writeZip(promoted.order.map(name => {
+    const verbatim = rawOf?.get(name)
+    const rewritten = name === TARGET_SLIDE || name === TARGET_RELS
+    if (!rewritten && verbatim !== undefined) {
+      return { name, raw: verbatim.raw, method: verbatim.method, usize: verbatim.usize, crc32: verbatim.crc32 }
+    }
+    return { name, data: promoted.entries.get(name) }
+  }))
   const stagedPath = join(dir, `${key}.pptx`)
   writeFileSync(stagedPath, buffer)
 

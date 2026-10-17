@@ -309,6 +309,8 @@ async function handleGet(name, url, res, store, bus, logger) {
         // 页号必须按 sldIdLst 的顺序映射到部件名：用户重排过幻灯片后
         // 文件名与显示页序不一致，按 slide${page}.xml 取会渲染错页。
         slideParts: pkg.slideParts,
+        // 原始压缩字节：暂存包写回时未修改的部件原样复制（省一次全包 deflate）
+        rawOf: pkg.rawOf,
         logger,
       }))
       renderQueue = task.then(() => undefined, () => undefined)
