@@ -25,7 +25,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
   const inject = ['slots', 'timer', 'sessions']
 
   /* __DSH_PPT_STYLES_START__ */
-  const __STYLES__ = "\n.dsh-ppt-footbtn{border:0;background:transparent;color:inherit;cursor:pointer;font-size:12px;padding:6px 10px;border-radius:6px;display:flex;align-items:center;gap:6px;}\n.dsh-ppt-footbtn:hover{background:rgba(128,128,128,.15);}\n\n/* ---------------- 可拖动浮窗（对话面板） ---------------- */\n.dsh-ppt-float{position:fixed;z-index:1200;pointer-events:auto;display:flex;flex-direction:column;\n  background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));border-radius:14px;\n  box-shadow:0 24px 70px rgba(0,0,0,.42);overflow:hidden;}\n.dsh-ppt-float.is-dragging{box-shadow:0 30px 80px rgba(0,0,0,.5);}\n.dsh-ppt-float>.dsh-ppt-panel{position:static!important;inset:auto!important;width:100%!important;height:100%!important;\n  border:0;border-radius:0;box-shadow:none;max-width:none;max-height:none;}\n.dsh-ppt-header.is-draggable{cursor:grab;user-select:none;}\n.dsh-ppt-float.is-dragging .dsh-ppt-header.is-draggable{cursor:grabbing;}\n.dsh-ppt-resize{position:absolute;right:2px;bottom:2px;width:16px;height:16px;cursor:nwse-resize;z-index:5;\n  background:linear-gradient(135deg,transparent 45%,var(--dsw-alias-border-l2,rgba(128,128,128,.55)) 45%,var(--dsw-alias-border-l2,rgba(128,128,128,.55)) 55%,transparent 55%,transparent 70%,var(--dsw-alias-border-l2,rgba(128,128,128,.55)) 70%,var(--dsw-alias-border-l2,rgba(128,128,128,.55)) 80%,transparent 80%);}\n\n/* ---------------- 独立窗口模式 ---------------- */\n/* 已移除：独立窗口功能（Electron 窗口）已归档到 archive/standalone-window/。 */\n\n/* ---------------- 拖拽打开 ---------------- */\n.dsh-ppt-drop{position:absolute;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;\n  background:rgba(26,115,232,.18);backdrop-filter:blur(1px);border:2px dashed var(--dsw-alias-brand-primary,#1a73e8);\n  border-radius:inherit;pointer-events:none;}\n.dsh-ppt-dropcard{display:flex;flex-direction:column;gap:4px;align-items:center;text-align:center;\n  padding:18px 26px;border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#111);\n  box-shadow:0 16px 40px rgba(0,0,0,.35);max-width:78%;}\n.dsh-ppt-dropcard b{font-size:14px;}\n.dsh-ppt-dropcard span{font-size:12px;color:var(--dsw-alias-label-secondary,#666);}\n\n.dsh-ppt-panel{\n  position:fixed;right:20px;bottom:20px;width:min(1180px,calc(100vw - 60px));height:min(760px,calc(100vh - 60px));\n  display:flex;flex-direction:column;pointer-events:auto;overflow:hidden;z-index:1200;\n  background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));border-radius:14px;\n  box-shadow:0 24px 70px rgba(0,0,0,.42);font-size:13px;line-height:1.5;\n}\n.dsh-ppt-launcher{\n  position:fixed;right:20px;bottom:20px;pointer-events:auto;z-index:1200;border:0;cursor:pointer;\n  padding:10px 16px;border-radius:999px;font-size:13px;font-weight:600;color:var(--dsw-alias-label-on-accent,#fff);\n  background:var(--dsw-alias-brand-primary,#1a73e8);box-shadow:0 8px 26px rgba(0,0,0,.35);\n}\n\n/* ---------------- 顶栏 ---------------- */\n.dsh-ppt-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;flex:none;\n  border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.06));}\n.dsh-ppt-title{display:flex;align-items:center;gap:10px;min-width:0;}\n.dsh-ppt-logo{display:inline-flex;align-items:center;justify-content:center;width:30px;height:22px;border-radius:5px;\n  background:var(--dsw-alias-brand-primary,#1a73e8);color:#fff;font-size:11px;font-weight:700;letter-spacing:.5px;flex:none;}\n.dsh-ppt-titles{display:flex;flex-direction:column;min-width:0;}\n.dsh-ppt-titles b{font-size:13px;font-weight:600;}\n.dsh-ppt-sub{font-size:11px;color:var(--dsw-alias-label-secondary,#888);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44vw;}\n.dsh-ppt-tools{display:flex;align-items:center;gap:6px;flex:none;}\n.dsh-ppt-sep{width:1px;height:16px;background:var(--dsw-alias-border-l2,rgba(128,128,128,.35));margin:0 2px;}\n.dsh-ppt-btn{border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:transparent;color:inherit;\n  cursor:pointer;font-size:12px;padding:4px 10px;border-radius:7px;white-space:nowrap;}\n.dsh-ppt-btn:hover:not(:disabled){background:rgba(128,128,128,.14);}\n.dsh-ppt-btn:disabled{opacity:.45;cursor:not-allowed;}\n.dsh-ppt-btn.is-primary{background:var(--dsw-alias-brand-primary,#1a73e8);border-color:transparent;color:var(--dsw-alias-label-on-accent,#fff);font-weight:600;}\n.dsh-ppt-btn-close{font-weight:700;padding:4px 9px;}\n.dsh-ppt-revbadge,.dsh-ppt-sessionbadge{font-size:11px;padding:2px 8px;border-radius:999px;\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-sessionbadge.is-ok{color:var(--dsw-alias-state-success-primary,#1f9d55);border-color:currentColor;}\n\n/* ---------------- 主体 ---------------- */\n/* 顶部错误条：失败原因常驻可见（不是 6 秒就消失的 toast） */\n.dsh-ppt-errorbar{display:flex;align-items:flex-start;gap:8px;padding:7px 10px;flex:none;\n  background:rgba(217,48,37,.1);border-bottom:1px solid rgba(217,48,37,.3);\n  color:var(--dsw-alias-state-error-primary,#d93025);font-size:12px;line-height:1.5;}\n.dsh-ppt-errorbar-text{flex:1;min-width:0;word-break:break-word;white-space:pre-wrap;}\n.dsh-ppt-errorbar-x{border:0;background:transparent;color:inherit;cursor:pointer;\n  font-size:15px;line-height:1;padding:0 4px;border-radius:4px;}\n.dsh-ppt-errorbar-x:hover{background:rgba(217,48,37,.18);}.dsh-ppt-body{display:flex;flex:1;min-height:0;}\n.dsh-ppt-thumbs{width:168px;flex:none;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px;\n  border-right:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));}\n.dsh-ppt-thumb{position:relative;border:1px solid transparent;background:transparent;padding:0;border-radius:8px;cursor:pointer;text-align:left;}\n.dsh-ppt-thumb.is-active{border-color:var(--dsw-alias-brand-primary,#1a73e8);box-shadow:0 0 0 2px rgba(26,115,232,.22);}\n.dsh-ppt-thumbhead{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 4px;}\n.dsh-ppt-thumbno{font-size:11px;color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-thumbpage{font-size:10px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));border-radius:5px;\n  background:transparent;color:inherit;cursor:pointer;padding:1px 5px;}\n.dsh-ppt-thumbpage:hover{background:rgba(128,128,128,.16);}\n.dsh-ppt-thumbframe{position:relative;overflow:hidden;border-radius:4px;background:#fff;\n  box-shadow:0 1px 4px rgba(0,0,0,.28);}\n.dsh-ppt-thumbslide{position:absolute;left:0;top:0;pointer-events:none;}\n\n.dsh-ppt-center{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base,#f3f4f6);}\n.dsh-ppt-canvaswrap{flex:1;min-height:0;overflow:auto;padding:18px;}\n.dsh-ppt-canvasstage{position:relative;margin:0 auto;}\n.dsh-ppt-canvas{position:relative;border-radius:4px;box-shadow:0 6px 26px rgba(0,0,0,.34);background:#fff;touch-action:none;}\n.dsh-ppt-slidewrap{position:relative;margin:0 auto;}\n.dsh-ppt-slide{position:relative;overflow:hidden;}\n.dsh-ppt-canvasmeta{position:absolute;right:6px;bottom:-18px;font-size:11px;color:var(--dsw-alias-label-secondary,#888);}\n\n/* ---------------- 精确渲染底图 + 只画高亮的覆盖层 ---------------- */\n.dsh-ppt-rendered{position:absolute;left:0;top:0;display:block;user-select:none;pointer-events:none;\n  image-rendering:auto;z-index:0;}\n.dsh-ppt-slide.is-overlay{background:transparent;}\n.dsh-ppt-el.is-overlay{background:transparent;cursor:move;}\n.dsh-ppt-el.is-overlay.is-selected{outline:2px solid var(--dsw-alias-brand-primary,#1a73e8);outline-offset:-1px;\n  background:rgba(26,115,232,.12);}\n.dsh-ppt-el.is-overlay.is-hovered{outline:1.5px dashed rgba(26,115,232,.75);outline-offset:-1px;}\n.dsh-ppt-el.is-overlay.is-ai-changed{outline:2px solid #F29900;outline-offset:-1px;background:rgba(242,153,0,.14);}\n\n/* 就地文字编辑器：叠在形状几何位置上，半透明白底盖住底图里的旧文字 */\n.dsh-ppt-textedit{position:absolute;z-index:400;resize:none;border:0;outline:2px solid var(--dsw-alias-brand-primary,#1a73e8);\n  background:rgba(255,255,255,.92);box-shadow:0 4px 18px rgba(0,0,0,.25);cursor:text;overflow:hidden;}\n\n/* ---------------- 元素 ---------------- */\n.dsh-ppt-el{position:absolute;box-sizing:border-box;}\n.dsh-ppt-el.kind-text{padding:2px 1px;}\n.dsh-ppt-el.is-hovered{outline:1px dashed rgba(26,115,232,.75);outline-offset:0;}\n.dsh-ppt-el.is-selected{outline:2px solid var(--dsw-alias-brand-primary,#1a73e8);outline-offset:0;background-color:rgba(26,115,232,.08);}\n.dsh-ppt-el.is-selected::after{content:\"\";position:absolute;inset:-2px;border-radius:2px;pointer-events:none;\n  background:\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) left top/7px 2px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) left top/2px 7px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) right top/7px 2px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) right top/2px 7px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) left bottom/7px 2px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) left bottom/2px 7px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) right bottom/7px 2px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) right bottom/2px 7px no-repeat;\n}\n.dsh-ppt-el.is-ai-changed{animation:dshPptPulse 1.1s ease-in-out 3;background-color:rgba(255,229,143,.55);\n  outline:2px solid #F2C200;outline-offset:0;}\n@keyframes dshPptPulse{0%,100%{background-color:rgba(255,229,143,.22)}50%{background-color:rgba(255,229,143,.75)}}\n.dsh-ppt-marquee{position:absolute;border:1px solid var(--dsw-alias-brand-primary,#1a73e8);\n  background:rgba(26,115,232,.14);pointer-events:none;z-index:9999;}\n.dsh-ppt-imfill{position:absolute;inset:0;pointer-events:none;}\n.dsh-ppt-chartbadge,.dsh-ppt-groupbadge{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);\n  font-size:11px;padding:2px 8px;border-radius:6px;background:rgba(128,128,128,.22);color:var(--dsw-alias-label-secondary,#666);white-space:nowrap;}\n.dsh-ppt-cell{border:1px solid rgba(0,0,0,.22);padding:3px 5px;overflow:hidden;color:#222;background:#fff;}\n.dsh-ppt-cell.is-head{background:#eef2f7;font-weight:600;}\n\n/* ---------------- 属性检查器 ---------------- */\n.dsh-ppt-inspector{width:262px;flex:none;overflow-y:auto;padding:10px 12px;\n  border-left:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));display:flex;flex-direction:column;gap:9px;}\n.dsh-ppt-inspector-head{display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:12px;\n  color:var(--dsw-alias-label-secondary,#888);text-transform:uppercase;letter-spacing:.04em;}\n.dsh-ppt-inspector-count{font-weight:500;text-transform:none;letter-spacing:0;}\n.dsh-ppt-inspector-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n.dsh-ppt-inspector-foot{margin-top:auto;padding-top:8px;}\n.dsh-ppt-empty{font-size:12px;color:var(--dsw-alias-label-secondary,#888);}\n\n/* ---------------- 最右：AI 思考与回复（可折叠） ---------------- */\n.dsh-ppt-aipane{width:288px;flex:none;display:flex;flex-direction:column;min-height:0;\n  border-left:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));background:var(--dsw-alias-bg-layer-2,#fafbfc);}\n/* 折叠态：一条 26px 的竖条，贴在右边缘，把宽度还给画布 */\n.dsh-ppt-aipane.is-collapsed{width:26px;align-items:center;justify-content:center;gap:6px;padding:8px 0;\n  border-left:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));border-top:0;border-right:0;border-bottom:0;\n  background:var(--dsw-alias-bg-layer-2,#fafbfc);color:var(--dsw-alias-label-secondary,#888);cursor:pointer;}\n.dsh-ppt-aipane.is-collapsed:hover{background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-aipane-collapsed-label{writing-mode:vertical-rl;text-orientation:mixed;font-size:11px;letter-spacing:.08em;\n  white-space:nowrap;user-select:none;}\n.dsh-ppt-aipane-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-aipane-dot.is-busy{animation:dsh-ppt-pulse 1.1s ease-in-out infinite;}\n@keyframes dsh-ppt-pulse{0%,100%{opacity:.35;}50%{opacity:1;}}\n.dsh-ppt-aipane-head{display:flex;align-items:center;justify-content:space-between;gap:8px;\n  padding:9px 10px 9px 12px;font-weight:600;font-size:12px;color:var(--dsw-alias-label-secondary,#888);\n  text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));}\n.dsh-ppt-aipane-head-right{display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;}\n.dsh-ppt-aipane-toggle{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px;line-height:1;\n  padding:2px 5px;border-radius:5px;}\n.dsh-ppt-aipane-toggle:hover{background:rgba(26,115,232,.14);color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-aipane-live{font-weight:500;text-transform:none;letter-spacing:0;color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-aipane-idle{font-weight:500;text-transform:none;letter-spacing:0;opacity:.7;}\n.dsh-ppt-aipane-error{margin:8px 12px 0;padding:6px 8px;border-radius:6px;font-size:11px;\n  background:rgba(217,48,37,.1);color:var(--dsw-alias-state-error-primary,#d93025);}\n.dsh-ppt-aipane-sec{display:flex;flex-direction:column;min-height:0;flex:1;padding:8px 12px 4px;}\n.dsh-ppt-aipane-sec.is-reply{flex:1.4;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));}\n.dsh-ppt-aipane-title{font-size:11px;font-weight:600;color:var(--dsw-alias-label-secondary,#888);margin-bottom:4px;}\n.dsh-ppt-aipane-body{flex:1;min-height:40px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;\n  font-size:12px;line-height:1.6;color:var(--dsw-alias-label-primary,#222);}\n.dsh-ppt-aipane-empty{opacity:.5;font-style:italic;}\n.dsh-ppt-aipane-hint{padding:6px 12px 10px;font-size:11px;opacity:.65;}\n.dsh-ppt-field{display:flex;flex-direction:column;gap:4px;}\n.dsh-ppt-field>label{font-size:11px;color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px;}\n.dsh-ppt-inline{display:flex;align-items:center;gap:6px;}\n.dsh-ppt-btnrow{display:flex;flex-wrap:wrap;gap:5px;}\n.dsh-ppt-input{width:100%;box-sizing:border-box;font:inherit;font-size:12px;padding:4px 7px;border-radius:6px;\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:var(--dsw-alias-bg-base,transparent);color:inherit;}\n.dsh-ppt-textarea{resize:vertical;min-height:52px;}\n.dsh-ppt-numfield{display:flex;align-items:center;gap:4px;}\n.dsh-ppt-numlabel{font-size:11px;color:var(--dsw-alias-label-secondary,#888);width:16px;flex:none;}\n.dsh-ppt-num{padding:4px 5px;}\n.dsh-ppt-color{width:32px;height:26px;padding:0;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));\n  border-radius:6px;background:transparent;cursor:pointer;flex:none;}\n.dsh-ppt-mini{font-size:11px;padding:3px 8px;border-radius:6px;cursor:pointer;color:inherit;\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:transparent;}\n.dsh-ppt-mini:hover{background:rgba(128,128,128,.16);}\n.dsh-ppt-mini.is-on{background:var(--dsw-alias-brand-primary,#1a73e8);border-color:transparent;color:#fff;font-weight:600;}\n.dsh-ppt-mini.is-danger{color:var(--dsw-alias-state-error-primary,#d93025);border-color:currentColor;}\n\n/* ---------------- 指令栏 ---------------- */\n.dsh-ppt-instruction{flex:none;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));padding:8px 12px 10px;\n  display:flex;flex-direction:column;gap:6px;background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.05));}\n.dsh-ppt-instr-head{display:flex;align-items:center;gap:10px;font-size:11px;}\n.dsh-ppt-instr-title{font-weight:600;}\n.dsh-ppt-instr-sel{color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-instr-draft{color:var(--dsw-alias-state-warn-primary,#b7791f);}\n.dsh-ppt-instr-sending{color:var(--dsw-alias-brand-primary,#1a73e8);font-weight:600;}\n.dsh-ppt-instr-body{display:flex;gap:8px;align-items:flex-end;}\n.dsh-ppt-instr-input{flex:1;box-sizing:border-box;font:inherit;font-size:13px;padding:7px 9px;border-radius:8px;resize:vertical;\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:var(--dsw-alias-bg-base,#fff);color:inherit;}\n.dsh-ppt-instr-actions{display:flex;gap:6px;flex:none;}\n.dsh-ppt-drafts{display:flex;flex-wrap:wrap;gap:6px;}\n.dsh-ppt-chip{font-size:11px;padding:2px 9px;border-radius:999px;cursor:pointer;background:rgba(26,115,232,.14);\n  border:1px solid rgba(26,115,232,.45);}\n.dsh-ppt-chip:hover{background:rgba(26,115,232,.24);}\n.dsh-ppt-warn{font-size:11px;color:var(--dsw-alias-state-warn-primary,#b7791f);}\n.dsh-ppt-sessionmenu{position:absolute;top:38px;right:12px;z-index:40;min-width:220px;max-height:280px;overflow:auto;\n  display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:10px;\n  background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));box-shadow:0 12px 34px rgba(0,0,0,.3);}\n.dsh-ppt-sessionmenu-title{font-size:11px;opacity:.7;padding:2px 6px 4px;}\n.dsh-ppt-sessionmenu-item{text-align:left;border:0;background:transparent;color:inherit;cursor:pointer;\n  font-size:11px;padding:5px 7px;border-radius:6px;font-family:ui-monospace,Consolas,monospace;\n  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n.dsh-ppt-sessionmenu-item:hover{background:rgba(26,115,232,.14);}\n.dsh-ppt-sessionmenu-item.is-current{font-weight:600;color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-sessionmenu-item.is-new{margin-top:3px;border-top:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:0 0 6px 6px;}\n.dsh-ppt-sessionmenu-empty{font-size:10px;opacity:.6;padding:4px 7px;}\n.dsh-ppt-sessionbadge{cursor:pointer;}\n.dsh-ppt-diag{margin-top:4px;font-size:10px;opacity:.7;word-break:break-all;font-family:ui-monospace,Consolas,monospace;}\n.dsh-ppt-histlist{display:flex;flex-direction:column;gap:2px;}\n.dsh-ppt-histrow{display:flex;gap:8px;font-size:11px;color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-histrev{flex:none;font-variant-numeric:tabular-nums;}\n.dsh-ppt-histsum{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n\n/* ---------------- 日志 / Toast / 弹窗 ---------------- */\n.dsh-ppt-log{flex:none;max-height:96px;overflow-y:auto;padding:6px 12px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));\n  font-size:11px;color:var(--dsw-alias-label-secondary,#888);display:flex;flex-direction:column;gap:2px;}\n.dsh-ppt-logrow.is-ok{color:var(--dsw-alias-state-success-primary,#1f9d55);}\n.dsh-ppt-logrow.is-warn{color:var(--dsw-alias-state-warn-primary,#b7791f);}\n.dsh-ppt-logrow.is-ai{color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-toasts{position:absolute;right:14px;top:54px;display:flex;flex-direction:column;gap:8px;z-index:30;max-width:340px;}\n.dsh-ppt-toast{display:flex;align-items:flex-start;gap:8px;padding:9px 11px;border-radius:10px;font-size:12px;\n  background:var(--dsw-alias-bg-overlay,#fff);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));\n  box-shadow:0 12px 30px rgba(0,0,0,.3);}\n.dsh-ppt-toast.is-ok{border-color:var(--dsw-alias-state-success-primary,#1f9d55);}\n.dsh-ppt-toast.is-error{border-color:var(--dsw-alias-state-error-primary,#d93025);}\n.dsh-ppt-toast.is-warn{border-color:var(--dsw-alias-state-warn-primary,#b7791f);}\n.dsh-ppt-toast-body{display:flex;flex-direction:column;gap:2px;flex:1;}\n.dsh-ppt-toast-body span{color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-toast-x{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;}\n.dsh-ppt-modal-back{position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:40;}\n.dsh-ppt-modal{width:min(560px,86%);display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:12px;\n  background:var(--dsw-alias-bg-overlay,#fff);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));\n  box-shadow:0 20px 50px rgba(0,0,0,.4);}\n.dsh-ppt-modal-hint{font-size:12px;color:var(--dsw-alias-label-secondary,#888);}\n/* ---------------- 打开演示文稿：面板内文件浏览器 ---------------- */\n.dsh-ppt-modal.is-picker{width:min(620px,92vw);max-height:82vh;display:flex;flex-direction:column;}\n.dsh-ppt-picker-bar{display:flex;gap:6px;margin:8px 0 6px;}\n.dsh-ppt-picker-list{flex:1;min-height:120px;max-height:46vh;overflow-y:auto;margin-top:8px;\n  border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));border-radius:8px;padding:4px;}\n.dsh-ppt-picker-row{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;\n  cursor:pointer;font-size:12.5px;padding:6px 8px;border-radius:6px;\n  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n.dsh-ppt-picker-row:hover{background:rgba(26,115,232,.14);}\n.dsh-ppt-picker-row.is-dir{color:var(--dsw-alias-label-secondary,#666);}\n.dsh-ppt-picker-row.is-pptx{font-weight:600;color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-picker-more{padding:4px 8px;font-size:11px;opacity:.6;}.dsh-ppt-modal-actions{display:flex;justify-content:flex-end;gap:8px;}\n.dsh-ppt-loading{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;gap:10px;\n  background:rgba(0,0,0,.28);color:#fff;font-size:13px;z-index:20;}\n.dsh-ppt-spinner{width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;\n  animation:dshPptSpin .8s linear infinite;}\n@keyframes dshPptSpin{to{transform:rotate(360deg)}}\n.dsh-ppt-welcome{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;text-align:center;}\n.dsh-ppt-welcome b{font-size:15px;}\n.dsh-ppt-welcome p{margin:0;font-size:12px;color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-welcome .dsh-ppt-btnrow{margin-top:10px;}\n"
+  const __STYLES__ = "\n.dsh-ppt-footbtn{border:0;background:transparent;color:inherit;cursor:pointer;font-size:12px;padding:6px 10px;border-radius:6px;display:flex;align-items:center;gap:6px;}\n.dsh-ppt-footbtn:hover{background:rgba(128,128,128,.15);}\n\n/* ---------------- 可拖动浮窗（对话面板） ---------------- */\n.dsh-ppt-float{position:fixed;z-index:1200;pointer-events:auto;display:flex;flex-direction:column;\n  background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));border-radius:14px;\n  box-shadow:0 24px 70px rgba(0,0,0,.42);overflow:hidden;}\n.dsh-ppt-float.is-dragging{box-shadow:0 30px 80px rgba(0,0,0,.5);}\n.dsh-ppt-float>.dsh-ppt-panel{position:static!important;inset:auto!important;width:100%!important;height:100%!important;\n  border:0;border-radius:0;box-shadow:none;max-width:none;max-height:none;}\n.dsh-ppt-header.is-draggable{cursor:grab;user-select:none;}\n.dsh-ppt-float.is-dragging .dsh-ppt-header.is-draggable{cursor:grabbing;}\n.dsh-ppt-resize{position:absolute;right:2px;bottom:2px;width:16px;height:16px;cursor:nwse-resize;z-index:5;\n  background:linear-gradient(135deg,transparent 45%,var(--dsw-alias-border-l2,rgba(128,128,128,.55)) 45%,var(--dsw-alias-border-l2,rgba(128,128,128,.55)) 55%,transparent 55%,transparent 70%,var(--dsw-alias-border-l2,rgba(128,128,128,.55)) 70%,var(--dsw-alias-border-l2,rgba(128,128,128,.55)) 80%,transparent 80%);}\n\n/* ---------------- 独立窗口模式 ---------------- */\n/* 已移除：独立窗口功能（Electron 窗口）已归档到 archive/standalone-window/。 */\n\n/* ---------------- 拖拽打开 ---------------- */\n.dsh-ppt-drop{position:absolute;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;\n  background:rgba(26,115,232,.18);backdrop-filter:blur(1px);border:2px dashed var(--dsw-alias-brand-primary,#1a73e8);\n  border-radius:inherit;pointer-events:none;}\n.dsh-ppt-dropcard{display:flex;flex-direction:column;gap:4px;align-items:center;text-align:center;\n  padding:18px 26px;border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#111);\n  box-shadow:0 16px 40px rgba(0,0,0,.35);max-width:78%;}\n.dsh-ppt-dropcard b{font-size:14px;}\n.dsh-ppt-dropcard span{font-size:12px;color:var(--dsw-alias-label-secondary,#666);}\n\n.dsh-ppt-panel{\n  position:fixed;right:20px;bottom:20px;width:min(1180px,calc(100vw - 60px));height:min(760px,calc(100vh - 60px));\n  display:flex;flex-direction:column;pointer-events:auto;overflow:hidden;z-index:1200;\n  background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));border-radius:14px;\n  box-shadow:0 24px 70px rgba(0,0,0,.42);font-size:13px;line-height:1.5;\n}\n.dsh-ppt-launcher{\n  position:fixed;right:20px;bottom:20px;pointer-events:auto;z-index:1200;border:0;cursor:pointer;\n  padding:10px 16px;border-radius:999px;font-size:13px;font-weight:600;color:var(--dsw-alias-label-on-accent,#fff);\n  background:var(--dsw-alias-brand-primary,#1a73e8);box-shadow:0 8px 26px rgba(0,0,0,.35);\n}\n/* 最小化容器：只作为提示卡与入口按钮的定位锚点，本身不占位 */\n.dsh-ppt-launcherwrap{position:fixed;right:20px;bottom:20px;pointer-events:none;z-index:1200}\n.dsh-ppt-launcherwrap .dsh-ppt-launcher{position:static;right:auto;bottom:auto;pointer-events:auto}\n\n/* 「看起来你在做 PPT」提示卡 */\n.dsh-ppt-pptprompt{\n  pointer-events:auto;margin-bottom:10px;width:260px;padding:12px 14px;border-radius:12px;\n  background:var(--dsw-alias-bg-elevated,#fff);color:var(--dsw-alias-label-primary,#1f2328);\n  border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.1));\n  box-shadow:0 12px 32px rgba(0,0,0,.28);font-size:13px;line-height:1.5;\n}\n.dsh-ppt-pptprompt-title{font-weight:600;margin-bottom:4px}\n.dsh-ppt-pptprompt-quote{\n  color:var(--dsw-alias-label-secondary,#5b6470);font-size:12px;margin-bottom:10px;\n  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;\n}\n.dsh-ppt-pptprompt-actions{display:flex;gap:8px;justify-content:flex-end}\n.dsh-ppt-pptprompt-actions button{\n  border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.12));background:transparent;cursor:pointer;\n  padding:5px 12px;border-radius:8px;font-size:12px;color:inherit;\n}\n.dsh-ppt-pptprompt-actions button.is-primary{\n  background:var(--dsw-alias-brand-primary,#1a73e8);border-color:transparent;\n  color:var(--dsw-alias-label-on-accent,#fff);font-weight:600;\n}\n\n/* ---------------- 顶栏 ---------------- */\n.dsh-ppt-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;flex:none;\n  border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.06));}\n.dsh-ppt-title{display:flex;align-items:center;gap:10px;min-width:0;}\n.dsh-ppt-logo{display:inline-flex;align-items:center;justify-content:center;width:30px;height:22px;border-radius:5px;\n  background:var(--dsw-alias-brand-primary,#1a73e8);color:#fff;font-size:11px;font-weight:700;letter-spacing:.5px;flex:none;}\n.dsh-ppt-titles{display:flex;flex-direction:column;min-width:0;}\n.dsh-ppt-titles b{font-size:13px;font-weight:600;}\n.dsh-ppt-sub{font-size:11px;color:var(--dsw-alias-label-secondary,#888);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44vw;}\n.dsh-ppt-tools{display:flex;align-items:center;gap:6px;flex:none;}\n.dsh-ppt-sep{width:1px;height:16px;background:var(--dsw-alias-border-l2,rgba(128,128,128,.35));margin:0 2px;}\n.dsh-ppt-btn{border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:transparent;color:inherit;\n  cursor:pointer;font-size:12px;padding:4px 10px;border-radius:7px;white-space:nowrap;}\n.dsh-ppt-btn:hover:not(:disabled){background:rgba(128,128,128,.14);}\n.dsh-ppt-btn:disabled{opacity:.45;cursor:not-allowed;}\n.dsh-ppt-btn.is-primary{background:var(--dsw-alias-brand-primary,#1a73e8);border-color:transparent;color:var(--dsw-alias-label-on-accent,#fff);font-weight:600;}\n.dsh-ppt-btn-close{font-weight:700;padding:4px 9px;}\n.dsh-ppt-revbadge,.dsh-ppt-sessionbadge{font-size:11px;padding:2px 8px;border-radius:999px;\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-sessionbadge.is-ok{color:var(--dsw-alias-state-success-primary,#1f9d55);border-color:currentColor;}\n\n/* ---------------- 主体 ---------------- */\n/* 顶部错误条：失败原因常驻可见（不是 6 秒就消失的 toast） */\n.dsh-ppt-errorbar{display:flex;align-items:flex-start;gap:8px;padding:7px 10px;flex:none;\n  background:rgba(217,48,37,.1);border-bottom:1px solid rgba(217,48,37,.3);\n  color:var(--dsw-alias-state-error-primary,#d93025);font-size:12px;line-height:1.5;}\n.dsh-ppt-errorbar-text{flex:1;min-width:0;word-break:break-word;white-space:pre-wrap;}\n.dsh-ppt-errorbar-x{border:0;background:transparent;color:inherit;cursor:pointer;\n  font-size:15px;line-height:1;padding:0 4px;border-radius:4px;}\n.dsh-ppt-errorbar-x:hover{background:rgba(217,48,37,.18);}.dsh-ppt-body{display:flex;flex:1;min-height:0;}\n.dsh-ppt-thumbs{width:168px;flex:none;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px;\n  border-right:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));}\n.dsh-ppt-thumb{position:relative;border:1px solid transparent;background:transparent;padding:0;border-radius:8px;cursor:pointer;text-align:left;}\n.dsh-ppt-thumb.is-active{border-color:var(--dsw-alias-brand-primary,#1a73e8);box-shadow:0 0 0 2px rgba(26,115,232,.22);}\n.dsh-ppt-thumbhead{display:flex;align-items:center;justify-content:space-between;padding:2px 4px 4px;}\n.dsh-ppt-thumbno{font-size:11px;color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-thumbpage{font-size:10px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));border-radius:5px;\n  background:transparent;color:inherit;cursor:pointer;padding:1px 5px;}\n.dsh-ppt-thumbpage:hover{background:rgba(128,128,128,.16);}\n.dsh-ppt-thumbframe{position:relative;overflow:hidden;border-radius:4px;background:#fff;\n  box-shadow:0 1px 4px rgba(0,0,0,.28);}\n.dsh-ppt-thumbslide{position:absolute;left:0;top:0;pointer-events:none;}\n\n.dsh-ppt-center{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;background:var(--dsw-alias-bg-base,#f3f4f6);}\n.dsh-ppt-canvaswrap{flex:1;min-height:0;overflow:auto;padding:18px;}\n.dsh-ppt-canvasstage{position:relative;margin:0 auto;}\n.dsh-ppt-canvas{position:relative;border-radius:4px;box-shadow:0 6px 26px rgba(0,0,0,.34);background:#fff;touch-action:none;}\n.dsh-ppt-slidewrap{position:relative;margin:0 auto;}\n.dsh-ppt-slide{position:relative;overflow:hidden;}\n.dsh-ppt-canvasmeta{position:absolute;right:6px;bottom:-18px;font-size:11px;color:var(--dsw-alias-label-secondary,#888);}\n\n/* ---------------- 精确渲染底图 + 只画高亮的覆盖层 ---------------- */\n.dsh-ppt-rendered{position:absolute;left:0;top:0;display:block;user-select:none;pointer-events:none;\n  image-rendering:auto;z-index:0;}\n.dsh-ppt-slide.is-overlay{background:transparent;}\n.dsh-ppt-el.is-overlay{background:transparent;cursor:move;}\n.dsh-ppt-el.is-overlay.is-selected{outline:2px solid var(--dsw-alias-brand-primary,#1a73e8);outline-offset:-1px;\n  background:rgba(26,115,232,.12);}\n.dsh-ppt-el.is-overlay.is-hovered{outline:1.5px dashed rgba(26,115,232,.75);outline-offset:-1px;}\n.dsh-ppt-el.is-overlay.is-ai-changed{outline:2px solid #F29900;outline-offset:-1px;background:rgba(242,153,0,.14);}\n\n/* 就地文字编辑器：叠在形状几何位置上，半透明白底盖住底图里的旧文字 */\n.dsh-ppt-textedit{position:absolute;z-index:400;resize:none;border:0;outline:2px solid var(--dsw-alias-brand-primary,#1a73e8);\n  background:rgba(255,255,255,.92);box-shadow:0 4px 18px rgba(0,0,0,.25);cursor:text;overflow:hidden;}\n\n/* ---------------- 元素 ---------------- */\n.dsh-ppt-el{position:absolute;box-sizing:border-box;}\n.dsh-ppt-el.kind-text{padding:2px 1px;}\n.dsh-ppt-el.is-hovered{outline:1px dashed rgba(26,115,232,.75);outline-offset:0;}\n.dsh-ppt-el.is-selected{outline:2px solid var(--dsw-alias-brand-primary,#1a73e8);outline-offset:0;background-color:rgba(26,115,232,.08);}\n.dsh-ppt-el.is-selected::after{content:\"\";position:absolute;inset:-2px;border-radius:2px;pointer-events:none;\n  background:\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) left top/7px 2px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) left top/2px 7px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) right top/7px 2px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) right top/2px 7px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) left bottom/7px 2px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) left bottom/2px 7px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) right bottom/7px 2px no-repeat,\n    linear-gradient(var(--dsw-alias-brand-primary,#1a73e8),var(--dsw-alias-brand-primary,#1a73e8)) right bottom/2px 7px no-repeat;\n}\n.dsh-ppt-el.is-ai-changed{animation:dshPptPulse 1.1s ease-in-out 3;background-color:rgba(255,229,143,.55);\n  outline:2px solid #F2C200;outline-offset:0;}\n@keyframes dshPptPulse{0%,100%{background-color:rgba(255,229,143,.22)}50%{background-color:rgba(255,229,143,.75)}}\n.dsh-ppt-marquee{position:absolute;border:1px solid var(--dsw-alias-brand-primary,#1a73e8);\n  background:rgba(26,115,232,.14);pointer-events:none;z-index:9999;}\n.dsh-ppt-imfill{position:absolute;inset:0;pointer-events:none;}\n.dsh-ppt-chartbadge,.dsh-ppt-groupbadge{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);\n  font-size:11px;padding:2px 8px;border-radius:6px;background:rgba(128,128,128,.22);color:var(--dsw-alias-label-secondary,#666);white-space:nowrap;}\n.dsh-ppt-cell{border:1px solid rgba(0,0,0,.22);padding:3px 5px;overflow:hidden;color:#222;background:#fff;}\n.dsh-ppt-cell.is-head{background:#eef2f7;font-weight:600;}\n\n/* ---------------- 属性检查器 ---------------- */\n.dsh-ppt-inspector{width:262px;flex:none;overflow-y:auto;padding:10px 12px;\n  border-left:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));display:flex;flex-direction:column;gap:9px;}\n.dsh-ppt-inspector-head{display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:12px;\n  color:var(--dsw-alias-label-secondary,#888);text-transform:uppercase;letter-spacing:.04em;}\n.dsh-ppt-inspector-count{font-weight:500;text-transform:none;letter-spacing:0;}\n.dsh-ppt-inspector-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n.dsh-ppt-inspector-foot{margin-top:auto;padding-top:8px;}\n.dsh-ppt-empty{font-size:12px;color:var(--dsw-alias-label-secondary,#888);}\n\n/* ---------------- 最右：AI 思考与回复（可折叠） ---------------- */\n.dsh-ppt-aipane{width:288px;flex:none;display:flex;flex-direction:column;min-height:0;\n  border-left:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));background:var(--dsw-alias-bg-layer-2,#fafbfc);}\n/* 折叠态：一条 26px 的竖条，贴在右边缘，把宽度还给画布 */\n.dsh-ppt-aipane.is-collapsed{width:26px;align-items:center;justify-content:center;gap:6px;padding:8px 0;\n  border-left:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));border-top:0;border-right:0;border-bottom:0;\n  background:var(--dsw-alias-bg-layer-2,#fafbfc);color:var(--dsw-alias-label-secondary,#888);cursor:pointer;}\n.dsh-ppt-aipane.is-collapsed:hover{background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-aipane-collapsed-label{writing-mode:vertical-rl;text-orientation:mixed;font-size:11px;letter-spacing:.08em;\n  white-space:nowrap;user-select:none;}\n.dsh-ppt-aipane-dot{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-aipane-dot.is-busy{animation:dsh-ppt-pulse 1.1s ease-in-out infinite;}\n@keyframes dsh-ppt-pulse{0%,100%{opacity:.35;}50%{opacity:1;}}\n.dsh-ppt-aipane-head{display:flex;align-items:center;justify-content:space-between;gap:8px;\n  padding:9px 10px 9px 12px;font-weight:600;font-size:12px;color:var(--dsw-alias-label-secondary,#888);\n  text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));}\n.dsh-ppt-aipane-head-right{display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;}\n.dsh-ppt-aipane-toggle{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px;line-height:1;\n  padding:2px 5px;border-radius:5px;}\n.dsh-ppt-aipane-toggle:hover{background:rgba(26,115,232,.14);color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-aipane-live{font-weight:500;text-transform:none;letter-spacing:0;color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-aipane-idle{font-weight:500;text-transform:none;letter-spacing:0;opacity:.7;}\n.dsh-ppt-aipane-error{margin:8px 12px 0;padding:6px 8px;border-radius:6px;font-size:11px;\n  background:rgba(217,48,37,.1);color:var(--dsw-alias-state-error-primary,#d93025);}\n.dsh-ppt-aipane-sec{display:flex;flex-direction:column;min-height:0;flex:1;padding:8px 12px 4px;}\n.dsh-ppt-aipane-sec.is-reply{flex:1.4;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));}\n.dsh-ppt-aipane-title{font-size:11px;font-weight:600;color:var(--dsw-alias-label-secondary,#888);margin-bottom:4px;}\n.dsh-ppt-aipane-body{flex:1;min-height:40px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;\n  font-size:12px;line-height:1.6;color:var(--dsw-alias-label-primary,#222);}\n.dsh-ppt-aipane-empty{opacity:.5;font-style:italic;}\n\n/* ---------------- 对话转播（替代原来的\"思考/回复\"两块）---------------- */\n.dsh-ppt-chat{\n  flex:1;min-height:0;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:10px;\n  font-size:12px;line-height:1.6;\n}\n.dsh-ppt-chat-empty{opacity:.55;font-style:italic;color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-chat-msg{display:flex;flex-direction:column;gap:2px;max-width:100%;}\n.dsh-ppt-chat-role{\n  font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;\n  color:var(--dsw-alias-label-secondary,#888);display:flex;gap:6px;align-items:center;\n}\n.dsh-ppt-chat-live{\n  font-size:10px;padding:0 6px;border-radius:999px;text-transform:none;letter-spacing:0;\n  background:rgba(26,115,232,.12);color:var(--dsw-alias-brand-primary,#1a73e8);\n}\n.dsh-ppt-chat-text{\n  white-space:pre-wrap;word-break:break-word;padding:8px 10px;border-radius:10px;\n  background:var(--dsw-alias-bg-secondary,rgba(128,128,128,.08));\n  color:var(--dsw-alias-label-primary,#222);\n}\n/* 用户消息靠右、用主色底，和普通对话一致 */\n.dsh-ppt-chat-msg.is-user{align-items:flex-end;}\n.dsh-ppt-chat-msg.is-user .dsh-ppt-chat-text{\n  background:var(--dsw-alias-brand-primary,#1a73e8);color:var(--dsw-alias-label-on-accent,#fff);\n  max-width:86%;\n}\n.dsh-ppt-chat-msg.is-ai .dsh-ppt-chat-text{max-width:96%;}\n/* 推理过程：弱化，折叠一行高度，点开才读 */\n.dsh-ppt-chat-thinking{\n  font-size:11px;line-height:1.5;color:var(--dsw-alias-label-secondary,#8b949e);\n  border-left:2px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));\n  padding-left:8px;max-height:96px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;\n}\n.dsh-ppt-chat-typing{font-size:11px;color:var(--dsw-alias-label-secondary,#888);font-style:italic;}\n.dsh-ppt-aipane-hint{padding:6px 12px 10px;font-size:11px;opacity:.65;}\n.dsh-ppt-field{display:flex;flex-direction:column;gap:4px;}\n.dsh-ppt-field>label{font-size:11px;color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px;}\n.dsh-ppt-inline{display:flex;align-items:center;gap:6px;}\n.dsh-ppt-btnrow{display:flex;flex-wrap:wrap;gap:5px;}\n.dsh-ppt-input{width:100%;box-sizing:border-box;font:inherit;font-size:12px;padding:4px 7px;border-radius:6px;\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:var(--dsw-alias-bg-base,transparent);color:inherit;}\n.dsh-ppt-textarea{resize:vertical;min-height:52px;}\n.dsh-ppt-numfield{display:flex;align-items:center;gap:4px;}\n.dsh-ppt-numlabel{font-size:11px;color:var(--dsw-alias-label-secondary,#888);width:16px;flex:none;}\n.dsh-ppt-num{padding:4px 5px;}\n.dsh-ppt-color{width:32px;height:26px;padding:0;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));\n  border-radius:6px;background:transparent;cursor:pointer;flex:none;}\n.dsh-ppt-mini{font-size:11px;padding:3px 8px;border-radius:6px;cursor:pointer;color:inherit;\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:transparent;}\n.dsh-ppt-mini:hover{background:rgba(128,128,128,.16);}\n.dsh-ppt-mini.is-on{background:var(--dsw-alias-brand-primary,#1a73e8);border-color:transparent;color:#fff;font-weight:600;}\n.dsh-ppt-mini.is-danger{color:var(--dsw-alias-state-error-primary,#d93025);border-color:currentColor;}\n\n/* ---------------- 指令栏 ---------------- */\n.dsh-ppt-instruction{flex:none;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));padding:8px 12px 10px;\n  display:flex;flex-direction:column;gap:6px;background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.05));}\n.dsh-ppt-instr-head{display:flex;align-items:center;gap:10px;font-size:11px;}\n.dsh-ppt-instr-title{font-weight:600;}\n.dsh-ppt-instr-sel{color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-instr-draft{color:var(--dsw-alias-state-warn-primary,#b7791f);}\n.dsh-ppt-instr-sending{color:var(--dsw-alias-brand-primary,#1a73e8);font-weight:600;}\n.dsh-ppt-instr-body{display:flex;gap:8px;align-items:flex-end;}\n.dsh-ppt-instr-input{flex:1;box-sizing:border-box;font:inherit;font-size:13px;padding:7px 9px;border-radius:8px;resize:vertical;\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));background:var(--dsw-alias-bg-base,#fff);color:inherit;}\n.dsh-ppt-instr-actions{display:flex;gap:6px;flex:none;}\n.dsh-ppt-drafts{display:flex;flex-wrap:wrap;gap:6px;}\n.dsh-ppt-chip{font-size:11px;padding:2px 9px;border-radius:999px;cursor:pointer;background:rgba(26,115,232,.14);\n  border:1px solid rgba(26,115,232,.45);}\n.dsh-ppt-chip:hover{background:rgba(26,115,232,.24);}\n.dsh-ppt-warn{font-size:11px;color:var(--dsw-alias-state-warn-primary,#b7791f);}\n.dsh-ppt-sessionmenu{position:absolute;top:38px;right:12px;z-index:40;min-width:220px;max-height:280px;overflow:auto;\n  display:flex;flex-direction:column;gap:2px;padding:6px;border-radius:10px;\n  background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#111);\n  border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.35));box-shadow:0 12px 34px rgba(0,0,0,.3);}\n.dsh-ppt-sessionmenu-title{font-size:11px;opacity:.7;padding:2px 6px 4px;}\n.dsh-ppt-sessionmenu-item{text-align:left;border:0;background:transparent;color:inherit;cursor:pointer;\n  font-size:11px;padding:5px 7px;border-radius:6px;font-family:ui-monospace,Consolas,monospace;\n  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n.dsh-ppt-sessionmenu-item:hover{background:rgba(26,115,232,.14);}\n.dsh-ppt-sessionmenu-item.is-current{font-weight:600;color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-sessionmenu-item.is-new{margin-top:3px;border-top:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.28));border-radius:0 0 6px 6px;}\n.dsh-ppt-sessionmenu-empty{font-size:10px;opacity:.6;padding:4px 7px;}\n.dsh-ppt-sessionbadge{cursor:pointer;}\n.dsh-ppt-diag{margin-top:4px;font-size:10px;opacity:.7;word-break:break-all;font-family:ui-monospace,Consolas,monospace;}\n.dsh-ppt-histlist{display:flex;flex-direction:column;gap:2px;}\n.dsh-ppt-histrow{display:flex;gap:8px;font-size:11px;color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-histrev{flex:none;font-variant-numeric:tabular-nums;}\n.dsh-ppt-histsum{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n\n/* ---------------- 日志 / Toast / 弹窗 ---------------- */\n.dsh-ppt-log{flex:none;max-height:96px;overflow-y:auto;padding:6px 12px;border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));\n  font-size:11px;color:var(--dsw-alias-label-secondary,#888);display:flex;flex-direction:column;gap:2px;}\n.dsh-ppt-logrow.is-ok{color:var(--dsw-alias-state-success-primary,#1f9d55);}\n.dsh-ppt-logrow.is-warn{color:var(--dsw-alias-state-warn-primary,#b7791f);}\n.dsh-ppt-logrow.is-ai{color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-toasts{position:absolute;right:14px;top:54px;display:flex;flex-direction:column;gap:8px;z-index:30;max-width:340px;}\n.dsh-ppt-toast{display:flex;align-items:flex-start;gap:8px;padding:9px 11px;border-radius:10px;font-size:12px;\n  background:var(--dsw-alias-bg-overlay,#fff);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));\n  box-shadow:0 12px 30px rgba(0,0,0,.3);}\n.dsh-ppt-toast.is-ok{border-color:var(--dsw-alias-state-success-primary,#1f9d55);}\n.dsh-ppt-toast.is-error{border-color:var(--dsw-alias-state-error-primary,#d93025);}\n.dsh-ppt-toast.is-warn{border-color:var(--dsw-alias-state-warn-primary,#b7791f);}\n.dsh-ppt-toast-body{display:flex;flex-direction:column;gap:2px;flex:1;}\n.dsh-ppt-toast-body span{color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-toast-x{border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;}\n.dsh-ppt-modal-back{position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:40;}\n.dsh-ppt-modal{width:min(560px,86%);display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:12px;\n  background:var(--dsw-alias-bg-overlay,#fff);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.4));\n  box-shadow:0 20px 50px rgba(0,0,0,.4);}\n.dsh-ppt-modal-hint{font-size:12px;color:var(--dsw-alias-label-secondary,#888);}\n/* ---------------- 打开演示文稿：面板内文件浏览器 ---------------- */\n.dsh-ppt-modal.is-picker{width:min(620px,92vw);max-height:82vh;display:flex;flex-direction:column;}\n.dsh-ppt-picker-bar{display:flex;gap:6px;margin:8px 0 6px;}\n.dsh-ppt-picker-list{flex:1;min-height:120px;max-height:46vh;overflow-y:auto;margin-top:8px;\n  border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));border-radius:8px;padding:4px;}\n.dsh-ppt-picker-row{display:block;width:100%;text-align:left;border:0;background:transparent;color:inherit;\n  cursor:pointer;font-size:12.5px;padding:6px 8px;border-radius:6px;\n  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}\n.dsh-ppt-picker-row:hover{background:rgba(26,115,232,.14);}\n.dsh-ppt-picker-row.is-dir{color:var(--dsw-alias-label-secondary,#666);}\n.dsh-ppt-picker-row.is-pptx{font-weight:600;color:var(--dsw-alias-brand-primary,#1a73e8);}\n.dsh-ppt-picker-more{padding:4px 8px;font-size:11px;opacity:.6;}.dsh-ppt-modal-actions{display:flex;justify-content:flex-end;gap:8px;}\n.dsh-ppt-loading{position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;gap:10px;\n  background:rgba(0,0,0,.28);color:#fff;font-size:13px;z-index:20;}\n.dsh-ppt-spinner{width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;\n  animation:dshPptSpin .8s linear infinite;}\n@keyframes dshPptSpin{to{transform:rotate(360deg)}}\n.dsh-ppt-welcome{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;text-align:center;}\n.dsh-ppt-welcome b{font-size:15px;}\n.dsh-ppt-welcome p{margin:0;font-size:12px;color:var(--dsw-alias-label-secondary,#888);}\n.dsh-ppt-welcome .dsh-ppt-btnrow{margin-top:10px;}\n"
     /* __DSH_PPT_STYLES_END__ */
 
   /* __DSH_PPT_APP_START__ */
@@ -346,7 +346,10 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
 
     function initialState() {
       return {
-        open: prefs.open === true,
+        // **启动时一律最小化**（只留一个入口按钮）。
+        // 以前读 prefs.open，而打开文稿时会自动把它写成 true —— 于是每次启动画布都
+        // 直接展开挡住界面。现在展开只能是用户主动点按钮，且不跨会话记忆。
+        open: false,
         sessionId: typeof prefs.sessionId === 'string' ? prefs.sessionId : '',
         sessionMenuOpen: false,
         connectedSession: false,
@@ -371,6 +374,9 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         editCaret: null,
         // 已就「磁盘文件被外部改过」提示过用户一次（避免每次轮询都弹）
         externalChangeWarned: false,
+        // 「看起来你在做 PPT，要打开画布吗」提示：null = 不显示。
+        // 由 FloatingPanel 在**最小化状态下**监听会话消息触发，避免打断用户。
+        pptPrompt: null,
         instruction: '',
         sending: false,
         pendingRequestId: null,
@@ -1335,20 +1341,33 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
      * `{ thinking, reply, error }`。面板不自己订阅 —— 事件流要 retain 会话，那件事
      * 在注入层做，界面层只读结果。
      */
+    /** 一条对话消息（用户 / 助手）。工具调用只保留一行摘要，不抢占正文。 */
+    function renderChatMessage(message, index) {
+      const isUser = message.role === 'user'
+      const text = typeof message.text === 'string' ? message.text : ''
+      const thinking = typeof message.thinking === 'string' ? message.thinking : ''
+      return h('div', { key: `msg-${index}`, className: `dsh-ppt-chat-msg ${isUser ? 'is-user' : 'is-ai'}` },
+        h('div', { className: 'dsh-ppt-chat-role' }, isUser ? '你' : 'AI',
+          message.live === true ? h('span', { className: 'dsh-ppt-chat-live' }, '生成中') : null),
+        thinking !== ''
+          ? h('div', { className: 'dsh-ppt-chat-thinking', title: '推理过程' }, thinking)
+          : null,
+        h('div', { className: 'dsh-ppt-chat-text' }, text === '' ? '（无正文）' : text),
+      )
+    }
+
     function AiPane(props) {
       const { store, state } = props
-      const ai = state.ai ?? { thinking: '', reply: '', error: null }
-      const thinkingRef = React.useRef(null)
-      const replyRef = React.useRef(null)
-      // 跟随最新内容：思考与回复都在增长，自动滚到底部。
+      const ai = state.ai ?? { messages: [], thinking: '', reply: '', error: null }
+      const messages = Array.isArray(ai.messages) ? ai.messages : []
+      const chatRef = React.useRef(null)
+      // 跟随最新消息：新消息进来就滚到底部（和普通对话一样）
       React.useEffect(() => {
-        for (const ref of [thinkingRef, replyRef]) {
-          const node = ref.current
-          if (node !== null && node !== undefined && typeof node.scrollTop === 'number') {
-            node.scrollTop = node.scrollHeight
-          }
+        const node = chatRef.current
+        if (node !== null && node !== undefined && typeof node.scrollTop === 'number') {
+          node.scrollTop = node.scrollHeight
         }
-      }, [ai.thinking, ai.reply])
+      }, [messages.length, state.sending])
 
       // 折叠后只剩一条贴边的竖条，不占画布宽度（默认折叠，避免一上来就挤掉 PPT）。
       const collapsed = state.aiCollapsed !== false
@@ -1368,7 +1387,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         )
       }
 
-      const empty = ai.thinking === '' && ai.reply === ''
+      const empty = messages.length === 0
       return h('div', { className: 'dsh-ppt-aipane' },
         h('div', { className: 'dsh-ppt-aipane-head' },
           h('span', null, 'AI 思考与回复'),
@@ -1386,18 +1405,18 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         ai.error !== null && ai.error !== ''
           ? h('div', { className: 'dsh-ppt-aipane-error' }, ai.error)
           : null,
-        h('div', { className: 'dsh-ppt-aipane-sec' },
-          h('div', { className: 'dsh-ppt-aipane-title' }, '思考过程'),
-          h('div', { className: 'dsh-ppt-aipane-body', ref: thinkingRef },
-            ai.thinking === '' ? h('span', { className: 'dsh-ppt-aipane-empty' }, '（还没有推理内容）') : ai.thinking),
-        ),
-        h('div', { className: 'dsh-ppt-aipane-sec is-reply' },
-          h('div', { className: 'dsh-ppt-aipane-title' }, '回复'),
-          h('div', { className: 'dsh-ppt-aipane-body', ref: replyRef },
-            ai.reply === '' ? h('span', { className: 'dsh-ppt-aipane-empty' }, '（还没有回复）') : ai.reply),
+        // 像普通对话一样**转播会话内容**：一条条消息，而不是拆成"思考/回复"两块。
+        h('div', { className: 'dsh-ppt-chat', ref: chatRef },
+          messages.length === 0
+            ? h('div', { className: 'dsh-ppt-chat-empty' },
+              state.connectedSession === true
+                ? '已连接会话。发送指令后，这里会按顺序显示你们的对话。'
+                : '还没有连接会话。点顶部「会话」连接后，这里会显示对话内容。')
+            : messages.map((message, index) => renderChatMessage(message, index)),
+          state.sending === true ? h('div', { className: 'dsh-ppt-chat-typing' }, '正在输入…') : null,
         ),
         empty && !state.sending
-          ? h('div', { className: 'dsh-ppt-aipane-hint' }, '发送指令后，这里会实时显示 AI 的推理与最终回复。')
+          ? h('div', { className: 'dsh-ppt-aipane-hint' }, '这里只是把会话内容转播过来；在下方输入框给 AI 下达针对选中元素的指令。')
           : null,
       )
     }
@@ -1961,10 +1980,69 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       }
     }
 
+    /**
+     * 「看起来你在做 PPT」提示卡（只在画布最小化时出现）。
+     *
+     * 触发条件见 FloatingPanel 里的 watchAi 订阅：用户在当前会话里提到
+     * PPT / 演示文稿 / 幻灯片等，且画布没打开。两条出路：打开画布，或「不用了」。
+     * 关掉后同一条消息不会再提示（由 seenPromptRef + store 里清空 pptPrompt 保证）。
+     */
+    function PptPromptCard(props) {
+      const { store, state, onOpen } = props
+      const prompt = state.pptPrompt
+      if (prompt === null || prompt === undefined) return null
+      return h('div', { className: 'dsh-ppt-pptprompt' },
+        h('div', { className: 'dsh-ppt-pptprompt-title' }, '看起来你在做 PPT'),
+        h('div', { className: 'dsh-ppt-pptprompt-quote' }, String(prompt.text ?? '').slice(0, 80)),
+        h('div', { className: 'dsh-ppt-pptprompt-actions' },
+          h('button', {
+            className: 'is-primary',
+            onClick: () => {
+              store.set({ pptPrompt: null })
+              onOpen()
+            },
+          }, '打开画布'),
+          h('button', {
+            onClick: () => store.set({ pptPrompt: null }),
+          }, '不用了'),
+        ),
+      )
+    }
+
     function FloatingPanel(props) {
       const { store, openPanel, titleBar, geometry, sessionIds, workspaceId, logOp } = props
       const state = useStore(store)
       const geo = geometry ?? { load: () => null, save: () => {}, initial: { width: 1180, height: 760 } }
+
+      // 「用户提到制作/修改 PPT」→ 提示是否打开画布。
+      // 必须在 FloatingPanel 里做：页面内的 Panel 只在展开时才渲染，
+      // 最小化状态下没人监听会话，就永远等不到这条提示。
+      const seenPromptRef = React.useRef('')
+      React.useEffect(() => {
+        if (state.open === true) return undefined        // 已经打开，不必提示
+        if (typeof watchAi !== 'function') return undefined
+        let sessionId = typeof state.sessionId === 'string' ? state.sessionId : ''
+        if (sessionId === '') {
+          try {
+            const ids = typeof listSessionIds === 'function' ? listSessionIds() : []
+            if (Array.isArray(ids) && ids.length > 0) sessionId = ids[ids.length - 1]
+          } catch { /* 拿不到会话就不提示 */ }
+        }
+        if (sessionId === '') return undefined
+        const off = watchAi(sessionId, next => {
+          const messages = Array.isArray(next?.messages) ? next.messages : []
+          const lastUser = [...messages].reverse().find(message => message?.role === 'user')
+          if (lastUser === undefined) return
+          const text = String(lastUser.text ?? '').trim()
+          if (text === '' || seenPromptRef.current === text) return
+          // 插件自己发的指令（带【PPT 协同编辑】前缀）不算用户意图
+          if (LOOKS_LIKE_PPT_REQUEST.test(text) === false) return
+          if (SELF_PPT_INSTRUCTION.test(text)) return
+          seenPromptRef.current = text
+          store.set({ pptPrompt: { text: text.slice(0, 240) } })
+        })
+        return off
+      }, [state.open, state.sessionId, store])
 
       const [box, setBox] = React.useState(() => {
         const saved = geo.load()
@@ -2064,11 +2142,15 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       }, [clampBox])
 
       if (!state.open) {
-        return h('button', {
-          className: 'dsh-ppt-launcher',
-          title: '打开 PPT 协同编辑画布',
-          onClick: () => openPanel(),
-        }, 'PPT 画布')
+        // 最小化状态：入口按钮 +（必要时）「要不要打开画布」提示卡
+        return h('div', { className: 'dsh-ppt-launcherwrap' },
+          h(PptPromptCard, { store, state, onOpen: () => openPanel() }),
+          h('button', {
+            className: 'dsh-ppt-launcher',
+            title: '打开 PPT 协同编辑画布',
+            onClick: () => openPanel(),
+          }, 'PPT 画布'),
+        )
       }
 
       const style = {
@@ -2280,7 +2362,8 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
           try {
             const next = await callApi('demo', {})
             adoptDeck(next)
-            savePrefs({ open: true })
+            // 不自动展开面板：以前这里写 savePrefs({ open: true })，于是每次打开文稿
+            // 画布都会自己弹出来挡住界面。现在只有用户点「PPT 画布」才会展开。
             logOp(`打开内置演示文稿（${next.slides.length} 页）`, 'ok')
           } catch (error) {
             store.set({ error: describeError(error) })
@@ -2299,7 +2382,8 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
           try {
             const next = await callApi('open', { path })
             adoptDeck(next)
-            savePrefs({ open: true, lastDir: path })
+            // 打开文档不自动展开画布（见 openDemo 的说明）
+            savePrefs({ lastDir: path })
             logOp(`打开 ${next.file}（${next.slides.length} 页）`, 'ok')
           } catch (error) {
             store.set({ error: describeError(error) })
@@ -2319,7 +2403,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
           try {
             const next = await callApi('files', { files: [{ name, content }] })
             adoptDeck(next)
-            savePrefs({ open: true })
+            // 打开文档不自动展开画布（见 openDemo 的说明）
             logOp(`打开 ${next.file}（${next.slides.length} 页）`, 'ok')
           } catch (error) {
             store.set({ error: describeError(error) })
@@ -2657,12 +2741,14 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
       }
 
       if (!state.open) {
-        return h('button', {
-          className: 'dsh-ppt-launcher',
-          title: '打开 PPT 协同编辑画布',
-          onClick: () => store.set({ open: true }),
-          ...dropProps,
-        }, 'PPT 画布')
+        return h('div', { className: 'dsh-ppt-launcherwrap', ...dropProps },
+          h(PptPromptCard, { store, state, onOpen: () => store.set({ open: true, pptPrompt: null }) }),
+          h('button', {
+            className: 'dsh-ppt-launcher',
+            title: '打开 PPT 协同编辑画布',
+            onClick: () => store.set({ open: true, pptPrompt: null }),
+          }, 'PPT 画布'),
+        )
       }
 
       const shellClass = 'dsh-ppt-panel'
@@ -2843,7 +2929,8 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
 
       const openPanel = () => {
         created.set({ open: true })
-        savePrefs({ open: true })
+        // 不再把 open 写进 prefs：初始状态固定为最小化（见 initialState 的说明），
+        // 写进去只会变成没人读的死配置。
       }
 
       if (mountOptions.root !== undefined && mountOptions.root !== null) {
@@ -3042,20 +3129,44 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
      * 订阅要在 retain 出来的 binding 上做；会话还没连接时没有可订阅的源，
      * 所以这里对外只暴露「最近一次读到的内容」，由面板按节拍读取。
      */
-    const aiState = { thinking: '', reply: '', error: null, sessionId: '' }
+    const aiState = { messages: [], thinking: '', reply: '', error: null, sessionId: '' }
 
-    /** 从一份事件窗口里抽出「最近一轮」的 reasoning 与正文。 */
-    const extractAi = (window) => {
+    /** 从 content 块数组里取纯文本（user / assistant 通用）。 */
+    const contentText = (content) => (Array.isArray(content)
+      ? content.filter(block => block?.type === 'text' && typeof block.text === 'string').map(block => block.text).join('')
+      : '')
+
+    /** 从 content 块数组里取推理文本。 */
+    const contentThinking = (content) => (Array.isArray(content)
+      ? content.filter(block => block?.type === 'reasoning' && typeof block.text === 'string').map(block => block.text).join('')
+      : '')
+
+    /**
+     * 从一份事件窗口里抽出**对话消息**（用户 + 助手，按事件顺序）。
+     *
+     * 用户要的是「像普通对话一样转播内容」，所以这里不再拆成"思考/回复"两块，
+     * 而是还原成一条条消息。用户消息的事件是 `user/message`，`event.data` 本身
+     * 就是 message（带 content 数组）；助手是 `assistant/message`，内容在
+     * `event.data.message.content`。
+     */
+    const extractTranscript = (window) => {
       const entries = Array.isArray(window?.entries) ? window.entries : []
-      let durable = null
+      const messages = []
       let liveThinking = ''
       const liveText = new Map()
       for (const entry of entries) {
         const event = entry?.event
         if (event === null || event === undefined) continue
+        if (event.type === 'user/message') {
+          const text = contentText(event.data?.content ?? event.data?.message?.content)
+          if (text.trim() !== '') messages.push({ role: 'user', text })
+          continue
+        }
         if (event.type === 'assistant/message') {
           const content = event.data?.message?.content ?? event.data?.content
-          if (Array.isArray(content)) durable = content
+          const text = contentText(content)
+          const thinking = contentThinking(content)
+          if (text.trim() !== '' || thinking !== '') messages.push({ role: 'assistant', text, thinking })
           continue
         }
         // 实时分片（当前这一轮还在跑）
@@ -3069,17 +3180,17 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         }
       }
 
-      let thinking = ''
-      let reply = ''
-      for (const block of durable ?? []) {
-        if (block?.type === 'reasoning' && typeof block.text === 'string') thinking += block.text
-        else if (block?.type === 'text' && typeof block.text === 'string') reply += block.text
+      // 正在生成的内容：作为最后一条临时助手消息，界面上就是"正在输入"
+      const liveReply = [...liveText.entries()].sort((a, b) => a[0] - b[0]).map(pair => pair[1]).join('')
+      if (liveReply !== '') messages.push({ role: 'assistant', text: liveReply, thinking: liveThinking, live: true })
+
+      const lastAssistant = [...messages].reverse().find(message => message.role === 'assistant')
+      return {
+        messages,
+        // 兼容：面板的空状态与测试仍会读这两个字段
+        thinking: lastAssistant?.thinking ?? liveThinking,
+        reply: lastAssistant?.text ?? '',
       }
-      if (reply === '' && liveText.size > 0) {
-        reply = [...liveText.entries()].sort((a, b) => a[0] - b[0]).map(pair => pair[1]).join('')
-      }
-      if (thinking === '') thinking = liveThinking
-      return { thinking, reply }
     }
 
     /**
@@ -3112,15 +3223,15 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
           if (cancelled) return // 已经卸载：不再订阅，也不再 emit
           const source = binding?.eventSource
           if (source === undefined || typeof source.subscribe !== 'function') {
-            emit({ thinking: '', reply: '', error: '会话没有事件源（eventSource）' })
+            emit({ messages: [], thinking: '', reply: '', error: '会话没有事件源（eventSource）' })
             return
           }
           const publish = () => {
             try {
-              const extracted = extractAi(source.getSnapshot())
+              const extracted = extractTranscript(source.getSnapshot())
               emit({ ...extracted, error: null })
             } catch (error) {
-              emit({ thinking: '', reply: '', error: error instanceof Error ? error.message : String(error) })
+              emit({ messages: [], thinking: '', reply: '', error: error instanceof Error ? error.message : String(error) })
             }
           }
           publish()
@@ -3138,7 +3249,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
             return watchAi(picked, emit, true)
           }
         }
-        emit({ thinking: '', reply: '', error: message })
+        emit({ messages: [], thinking: '', reply: '', error: message })
       }
       return () => {
         cancelled = true

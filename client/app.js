@@ -18,6 +18,16 @@
  */
 
 /**
+ * 用户是不是在说「做 / 改 PPT」。
+ *
+ * 只在明确提到演示文稿时提示一次，避免把随口聊到的 slide/deck 都算上。
+ */
+const LOOKS_LIKE_PPT_REQUEST = /\bpptx?\b|powerpoint|演示文稿|幻灯片|投影片|\bslides?\b|\bdeck\b|presentation/i
+
+/** 插件自己发出的指令带这个前缀 —— 那不是用户意图，别拿它来提示。 */
+const SELF_PPT_INSTRUCTION = /【PPT 协同编辑】/
+
+/**
  * @param {object} options 见文件头
  * @returns {{React: object, Component: Function, createStore: Function, initialState: Function,
  *            install: Function, savePrefs: Function, extractDroppedPath: Function}}
@@ -334,7 +344,10 @@ function createPptApp(options) {
 
   function initialState() {
     return {
-      open: prefs.open === true,
+      // **启动时一律最小化**（只留一个入口按钮）。
+      // 以前读 prefs.open，而打开文稿时会自动把它写成 true —— 于是每次启动画布都
+      // 直接展开挡住界面。现在展开只能是用户主动点按钮，且不跨会话记忆。
+      open: false,
       sessionId: typeof prefs.sessionId === 'string' ? prefs.sessionId : '',
       sessionMenuOpen: false,
       connectedSession: false,
@@ -359,6 +372,9 @@ function createPptApp(options) {
       editCaret: null,
       // 已就「磁盘文件被外部改过」提示过用户一次（避免每次轮询都弹）
       externalChangeWarned: false,
+      // 「看起来你在做 PPT，要打开画布吗」提示：null = 不显示。
+      // 由 FloatingPanel 在**最小化状态下**监听会话消息触发，避免打断用户。
+      pptPrompt: null,
       instruction: '',
       sending: false,
       pendingRequestId: null,
@@ -1323,20 +1339,33 @@ function createPptApp(options) {
    * `{ thinking, reply, error }`。面板不自己订阅 —— 事件流要 retain 会话，那件事
    * 在注入层做，界面层只读结果。
    */
+  /** 一条对话消息（用户 / 助手）。工具调用只保留一行摘要，不抢占正文。 */
+  function renderChatMessage(message, index) {
+    const isUser = message.role === 'user'
+    const text = typeof message.text === 'string' ? message.text : ''
+    const thinking = typeof message.thinking === 'string' ? message.thinking : ''
+    return h('div', { key: `msg-${index}`, className: `dsh-ppt-chat-msg ${isUser ? 'is-user' : 'is-ai'}` },
+      h('div', { className: 'dsh-ppt-chat-role' }, isUser ? '你' : 'AI',
+        message.live === true ? h('span', { className: 'dsh-ppt-chat-live' }, '生成中') : null),
+      thinking !== ''
+        ? h('div', { className: 'dsh-ppt-chat-thinking', title: '推理过程' }, thinking)
+        : null,
+      h('div', { className: 'dsh-ppt-chat-text' }, text === '' ? '（无正文）' : text),
+    )
+  }
+
   function AiPane(props) {
     const { store, state } = props
-    const ai = state.ai ?? { thinking: '', reply: '', error: null }
-    const thinkingRef = React.useRef(null)
-    const replyRef = React.useRef(null)
-    // 跟随最新内容：思考与回复都在增长，自动滚到底部。
+    const ai = state.ai ?? { messages: [], thinking: '', reply: '', error: null }
+    const messages = Array.isArray(ai.messages) ? ai.messages : []
+    const chatRef = React.useRef(null)
+    // 跟随最新消息：新消息进来就滚到底部（和普通对话一样）
     React.useEffect(() => {
-      for (const ref of [thinkingRef, replyRef]) {
-        const node = ref.current
-        if (node !== null && node !== undefined && typeof node.scrollTop === 'number') {
-          node.scrollTop = node.scrollHeight
-        }
+      const node = chatRef.current
+      if (node !== null && node !== undefined && typeof node.scrollTop === 'number') {
+        node.scrollTop = node.scrollHeight
       }
-    }, [ai.thinking, ai.reply])
+    }, [messages.length, state.sending])
 
     // 折叠后只剩一条贴边的竖条，不占画布宽度（默认折叠，避免一上来就挤掉 PPT）。
     const collapsed = state.aiCollapsed !== false
@@ -1356,7 +1385,7 @@ function createPptApp(options) {
       )
     }
 
-    const empty = ai.thinking === '' && ai.reply === ''
+    const empty = messages.length === 0
     return h('div', { className: 'dsh-ppt-aipane' },
       h('div', { className: 'dsh-ppt-aipane-head' },
         h('span', null, 'AI 思考与回复'),
@@ -1374,18 +1403,18 @@ function createPptApp(options) {
       ai.error !== null && ai.error !== ''
         ? h('div', { className: 'dsh-ppt-aipane-error' }, ai.error)
         : null,
-      h('div', { className: 'dsh-ppt-aipane-sec' },
-        h('div', { className: 'dsh-ppt-aipane-title' }, '思考过程'),
-        h('div', { className: 'dsh-ppt-aipane-body', ref: thinkingRef },
-          ai.thinking === '' ? h('span', { className: 'dsh-ppt-aipane-empty' }, '（还没有推理内容）') : ai.thinking),
-      ),
-      h('div', { className: 'dsh-ppt-aipane-sec is-reply' },
-        h('div', { className: 'dsh-ppt-aipane-title' }, '回复'),
-        h('div', { className: 'dsh-ppt-aipane-body', ref: replyRef },
-          ai.reply === '' ? h('span', { className: 'dsh-ppt-aipane-empty' }, '（还没有回复）') : ai.reply),
+      // 像普通对话一样**转播会话内容**：一条条消息，而不是拆成"思考/回复"两块。
+      h('div', { className: 'dsh-ppt-chat', ref: chatRef },
+        messages.length === 0
+          ? h('div', { className: 'dsh-ppt-chat-empty' },
+            state.connectedSession === true
+              ? '已连接会话。发送指令后，这里会按顺序显示你们的对话。'
+              : '还没有连接会话。点顶部「会话」连接后，这里会显示对话内容。')
+          : messages.map((message, index) => renderChatMessage(message, index)),
+        state.sending === true ? h('div', { className: 'dsh-ppt-chat-typing' }, '正在输入…') : null,
       ),
       empty && !state.sending
-        ? h('div', { className: 'dsh-ppt-aipane-hint' }, '发送指令后，这里会实时显示 AI 的推理与最终回复。')
+        ? h('div', { className: 'dsh-ppt-aipane-hint' }, '这里只是把会话内容转播过来；在下方输入框给 AI 下达针对选中元素的指令。')
         : null,
     )
   }
@@ -1949,10 +1978,69 @@ function createPptApp(options) {
     }
   }
 
+  /**
+   * 「看起来你在做 PPT」提示卡（只在画布最小化时出现）。
+   *
+   * 触发条件见 FloatingPanel 里的 watchAi 订阅：用户在当前会话里提到
+   * PPT / 演示文稿 / 幻灯片等，且画布没打开。两条出路：打开画布，或「不用了」。
+   * 关掉后同一条消息不会再提示（由 seenPromptRef + store 里清空 pptPrompt 保证）。
+   */
+  function PptPromptCard(props) {
+    const { store, state, onOpen } = props
+    const prompt = state.pptPrompt
+    if (prompt === null || prompt === undefined) return null
+    return h('div', { className: 'dsh-ppt-pptprompt' },
+      h('div', { className: 'dsh-ppt-pptprompt-title' }, '看起来你在做 PPT'),
+      h('div', { className: 'dsh-ppt-pptprompt-quote' }, String(prompt.text ?? '').slice(0, 80)),
+      h('div', { className: 'dsh-ppt-pptprompt-actions' },
+        h('button', {
+          className: 'is-primary',
+          onClick: () => {
+            store.set({ pptPrompt: null })
+            onOpen()
+          },
+        }, '打开画布'),
+        h('button', {
+          onClick: () => store.set({ pptPrompt: null }),
+        }, '不用了'),
+      ),
+    )
+  }
+
   function FloatingPanel(props) {
     const { store, openPanel, titleBar, geometry, sessionIds, workspaceId, logOp } = props
     const state = useStore(store)
     const geo = geometry ?? { load: () => null, save: () => {}, initial: { width: 1180, height: 760 } }
+
+    // 「用户提到制作/修改 PPT」→ 提示是否打开画布。
+    // 必须在 FloatingPanel 里做：页面内的 Panel 只在展开时才渲染，
+    // 最小化状态下没人监听会话，就永远等不到这条提示。
+    const seenPromptRef = React.useRef('')
+    React.useEffect(() => {
+      if (state.open === true) return undefined        // 已经打开，不必提示
+      if (typeof watchAi !== 'function') return undefined
+      let sessionId = typeof state.sessionId === 'string' ? state.sessionId : ''
+      if (sessionId === '') {
+        try {
+          const ids = typeof listSessionIds === 'function' ? listSessionIds() : []
+          if (Array.isArray(ids) && ids.length > 0) sessionId = ids[ids.length - 1]
+        } catch { /* 拿不到会话就不提示 */ }
+      }
+      if (sessionId === '') return undefined
+      const off = watchAi(sessionId, next => {
+        const messages = Array.isArray(next?.messages) ? next.messages : []
+        const lastUser = [...messages].reverse().find(message => message?.role === 'user')
+        if (lastUser === undefined) return
+        const text = String(lastUser.text ?? '').trim()
+        if (text === '' || seenPromptRef.current === text) return
+        // 插件自己发的指令（带【PPT 协同编辑】前缀）不算用户意图
+        if (LOOKS_LIKE_PPT_REQUEST.test(text) === false) return
+        if (SELF_PPT_INSTRUCTION.test(text)) return
+        seenPromptRef.current = text
+        store.set({ pptPrompt: { text: text.slice(0, 240) } })
+      })
+      return off
+    }, [state.open, state.sessionId, store])
 
     const [box, setBox] = React.useState(() => {
       const saved = geo.load()
@@ -2052,11 +2140,15 @@ function createPptApp(options) {
     }, [clampBox])
 
     if (!state.open) {
-      return h('button', {
-        className: 'dsh-ppt-launcher',
-        title: '打开 PPT 协同编辑画布',
-        onClick: () => openPanel(),
-      }, 'PPT 画布')
+      // 最小化状态：入口按钮 +（必要时）「要不要打开画布」提示卡
+      return h('div', { className: 'dsh-ppt-launcherwrap' },
+        h(PptPromptCard, { store, state, onOpen: () => openPanel() }),
+        h('button', {
+          className: 'dsh-ppt-launcher',
+          title: '打开 PPT 协同编辑画布',
+          onClick: () => openPanel(),
+        }, 'PPT 画布'),
+      )
     }
 
     const style = {
@@ -2268,7 +2360,8 @@ function createPptApp(options) {
         try {
           const next = await callApi('demo', {})
           adoptDeck(next)
-          savePrefs({ open: true })
+          // 不自动展开面板：以前这里写 savePrefs({ open: true })，于是每次打开文稿
+          // 画布都会自己弹出来挡住界面。现在只有用户点「PPT 画布」才会展开。
           logOp(`打开内置演示文稿（${next.slides.length} 页）`, 'ok')
         } catch (error) {
           store.set({ error: describeError(error) })
@@ -2287,7 +2380,8 @@ function createPptApp(options) {
         try {
           const next = await callApi('open', { path })
           adoptDeck(next)
-          savePrefs({ open: true, lastDir: path })
+          // 打开文档不自动展开画布（见 openDemo 的说明）
+          savePrefs({ lastDir: path })
           logOp(`打开 ${next.file}（${next.slides.length} 页）`, 'ok')
         } catch (error) {
           store.set({ error: describeError(error) })
@@ -2307,7 +2401,7 @@ function createPptApp(options) {
         try {
           const next = await callApi('files', { files: [{ name, content }] })
           adoptDeck(next)
-          savePrefs({ open: true })
+          // 打开文档不自动展开画布（见 openDemo 的说明）
           logOp(`打开 ${next.file}（${next.slides.length} 页）`, 'ok')
         } catch (error) {
           store.set({ error: describeError(error) })
@@ -2645,12 +2739,14 @@ function createPptApp(options) {
     }
 
     if (!state.open) {
-      return h('button', {
-        className: 'dsh-ppt-launcher',
-        title: '打开 PPT 协同编辑画布',
-        onClick: () => store.set({ open: true }),
-        ...dropProps,
-      }, 'PPT 画布')
+      return h('div', { className: 'dsh-ppt-launcherwrap', ...dropProps },
+        h(PptPromptCard, { store, state, onOpen: () => store.set({ open: true, pptPrompt: null }) }),
+        h('button', {
+          className: 'dsh-ppt-launcher',
+          title: '打开 PPT 协同编辑画布',
+          onClick: () => store.set({ open: true, pptPrompt: null }),
+        }, 'PPT 画布'),
+      )
     }
 
     const shellClass = 'dsh-ppt-panel'
@@ -2831,7 +2927,8 @@ function createPptApp(options) {
 
     const openPanel = () => {
       created.set({ open: true })
-      savePrefs({ open: true })
+      // 不再把 open 写进 prefs：初始状态固定为最小化（见 initialState 的说明），
+      // 写进去只会变成没人读的死配置。
     }
 
     if (mountOptions.root !== undefined && mountOptions.root !== null) {

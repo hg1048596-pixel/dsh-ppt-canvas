@@ -153,20 +153,44 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
      * 订阅要在 retain 出来的 binding 上做；会话还没连接时没有可订阅的源，
      * 所以这里对外只暴露「最近一次读到的内容」，由面板按节拍读取。
      */
-    const aiState = { thinking: '', reply: '', error: null, sessionId: '' }
+    const aiState = { messages: [], thinking: '', reply: '', error: null, sessionId: '' }
 
-    /** 从一份事件窗口里抽出「最近一轮」的 reasoning 与正文。 */
-    const extractAi = (window) => {
+    /** 从 content 块数组里取纯文本（user / assistant 通用）。 */
+    const contentText = (content) => (Array.isArray(content)
+      ? content.filter(block => block?.type === 'text' && typeof block.text === 'string').map(block => block.text).join('')
+      : '')
+
+    /** 从 content 块数组里取推理文本。 */
+    const contentThinking = (content) => (Array.isArray(content)
+      ? content.filter(block => block?.type === 'reasoning' && typeof block.text === 'string').map(block => block.text).join('')
+      : '')
+
+    /**
+     * 从一份事件窗口里抽出**对话消息**（用户 + 助手，按事件顺序）。
+     *
+     * 用户要的是「像普通对话一样转播内容」，所以这里不再拆成"思考/回复"两块，
+     * 而是还原成一条条消息。用户消息的事件是 `user/message`，`event.data` 本身
+     * 就是 message（带 content 数组）；助手是 `assistant/message`，内容在
+     * `event.data.message.content`。
+     */
+    const extractTranscript = (window) => {
       const entries = Array.isArray(window?.entries) ? window.entries : []
-      let durable = null
+      const messages = []
       let liveThinking = ''
       const liveText = new Map()
       for (const entry of entries) {
         const event = entry?.event
         if (event === null || event === undefined) continue
+        if (event.type === 'user/message') {
+          const text = contentText(event.data?.content ?? event.data?.message?.content)
+          if (text.trim() !== '') messages.push({ role: 'user', text })
+          continue
+        }
         if (event.type === 'assistant/message') {
           const content = event.data?.message?.content ?? event.data?.content
-          if (Array.isArray(content)) durable = content
+          const text = contentText(content)
+          const thinking = contentThinking(content)
+          if (text.trim() !== '' || thinking !== '') messages.push({ role: 'assistant', text, thinking })
           continue
         }
         // 实时分片（当前这一轮还在跑）
@@ -180,17 +204,17 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
         }
       }
 
-      let thinking = ''
-      let reply = ''
-      for (const block of durable ?? []) {
-        if (block?.type === 'reasoning' && typeof block.text === 'string') thinking += block.text
-        else if (block?.type === 'text' && typeof block.text === 'string') reply += block.text
+      // 正在生成的内容：作为最后一条临时助手消息，界面上就是"正在输入"
+      const liveReply = [...liveText.entries()].sort((a, b) => a[0] - b[0]).map(pair => pair[1]).join('')
+      if (liveReply !== '') messages.push({ role: 'assistant', text: liveReply, thinking: liveThinking, live: true })
+
+      const lastAssistant = [...messages].reverse().find(message => message.role === 'assistant')
+      return {
+        messages,
+        // 兼容：面板的空状态与测试仍会读这两个字段
+        thinking: lastAssistant?.thinking ?? liveThinking,
+        reply: lastAssistant?.text ?? '',
       }
-      if (reply === '' && liveText.size > 0) {
-        reply = [...liveText.entries()].sort((a, b) => a[0] - b[0]).map(pair => pair[1]).join('')
-      }
-      if (thinking === '') thinking = liveThinking
-      return { thinking, reply }
     }
 
     /**
@@ -223,15 +247,15 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
           if (cancelled) return // 已经卸载：不再订阅，也不再 emit
           const source = binding?.eventSource
           if (source === undefined || typeof source.subscribe !== 'function') {
-            emit({ thinking: '', reply: '', error: '会话没有事件源（eventSource）' })
+            emit({ messages: [], thinking: '', reply: '', error: '会话没有事件源（eventSource）' })
             return
           }
           const publish = () => {
             try {
-              const extracted = extractAi(source.getSnapshot())
+              const extracted = extractTranscript(source.getSnapshot())
               emit({ ...extracted, error: null })
             } catch (error) {
-              emit({ thinking: '', reply: '', error: error instanceof Error ? error.message : String(error) })
+              emit({ messages: [], thinking: '', reply: '', error: error instanceof Error ? error.message : String(error) })
             }
           }
           publish()
@@ -249,7 +273,7 @@ window.__ModuleLoader__?.load({ id: 'dsh-ppt-canvas', factory: (require) => {
             return watchAi(picked, emit, true)
           }
         }
-        emit({ thinking: '', reply: '', error: message })
+        emit({ messages: [], thinking: '', reply: '', error: message })
       }
       return () => {
         cancelled = true

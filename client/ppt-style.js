@@ -47,6 +47,31 @@ const CSS = `
   padding:10px 16px;border-radius:999px;font-size:13px;font-weight:600;color:var(--dsw-alias-label-on-accent,#fff);
   background:var(--dsw-alias-brand-primary,#1a73e8);box-shadow:0 8px 26px rgba(0,0,0,.35);
 }
+/* 最小化容器：只作为提示卡与入口按钮的定位锚点，本身不占位 */
+.dsh-ppt-launcherwrap{position:fixed;right:20px;bottom:20px;pointer-events:none;z-index:1200}
+.dsh-ppt-launcherwrap .dsh-ppt-launcher{position:static;right:auto;bottom:auto;pointer-events:auto}
+
+/* 「看起来你在做 PPT」提示卡 */
+.dsh-ppt-pptprompt{
+  pointer-events:auto;margin-bottom:10px;width:260px;padding:12px 14px;border-radius:12px;
+  background:var(--dsw-alias-bg-elevated,#fff);color:var(--dsw-alias-label-primary,#1f2328);
+  border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.1));
+  box-shadow:0 12px 32px rgba(0,0,0,.28);font-size:13px;line-height:1.5;
+}
+.dsh-ppt-pptprompt-title{font-weight:600;margin-bottom:4px}
+.dsh-ppt-pptprompt-quote{
+  color:var(--dsw-alias-label-secondary,#5b6470);font-size:12px;margin-bottom:10px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.dsh-ppt-pptprompt-actions{display:flex;gap:8px;justify-content:flex-end}
+.dsh-ppt-pptprompt-actions button{
+  border:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.12));background:transparent;cursor:pointer;
+  padding:5px 12px;border-radius:8px;font-size:12px;color:inherit;
+}
+.dsh-ppt-pptprompt-actions button.is-primary{
+  background:var(--dsw-alias-brand-primary,#1a73e8);border-color:transparent;
+  color:var(--dsw-alias-label-on-accent,#fff);font-weight:600;
+}
 
 /* ---------------- 顶栏 ---------------- */
 .dsh-ppt-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 12px;flex:none;
@@ -180,6 +205,41 @@ const CSS = `
 .dsh-ppt-aipane-body{flex:1;min-height:40px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
   font-size:12px;line-height:1.6;color:var(--dsw-alias-label-primary,#222);}
 .dsh-ppt-aipane-empty{opacity:.5;font-style:italic;}
+
+/* ---------------- 对话转播（替代原来的"思考/回复"两块）---------------- */
+.dsh-ppt-chat{
+  flex:1;min-height:0;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:10px;
+  font-size:12px;line-height:1.6;
+}
+.dsh-ppt-chat-empty{opacity:.55;font-style:italic;color:var(--dsw-alias-label-secondary,#888);}
+.dsh-ppt-chat-msg{display:flex;flex-direction:column;gap:2px;max-width:100%;}
+.dsh-ppt-chat-role{
+  font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--dsw-alias-label-secondary,#888);display:flex;gap:6px;align-items:center;
+}
+.dsh-ppt-chat-live{
+  font-size:10px;padding:0 6px;border-radius:999px;text-transform:none;letter-spacing:0;
+  background:rgba(26,115,232,.12);color:var(--dsw-alias-brand-primary,#1a73e8);
+}
+.dsh-ppt-chat-text{
+  white-space:pre-wrap;word-break:break-word;padding:8px 10px;border-radius:10px;
+  background:var(--dsw-alias-bg-secondary,rgba(128,128,128,.08));
+  color:var(--dsw-alias-label-primary,#222);
+}
+/* 用户消息靠右、用主色底，和普通对话一致 */
+.dsh-ppt-chat-msg.is-user{align-items:flex-end;}
+.dsh-ppt-chat-msg.is-user .dsh-ppt-chat-text{
+  background:var(--dsw-alias-brand-primary,#1a73e8);color:var(--dsw-alias-label-on-accent,#fff);
+  max-width:86%;
+}
+.dsh-ppt-chat-msg.is-ai .dsh-ppt-chat-text{max-width:96%;}
+/* 推理过程：弱化，折叠一行高度，点开才读 */
+.dsh-ppt-chat-thinking{
+  font-size:11px;line-height:1.5;color:var(--dsw-alias-label-secondary,#8b949e);
+  border-left:2px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25));
+  padding-left:8px;max-height:96px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
+}
+.dsh-ppt-chat-typing{font-size:11px;color:var(--dsw-alias-label-secondary,#888);font-style:italic;}
 .dsh-ppt-aipane-hint{padding:6px 12px 10px;font-size:11px;opacity:.65;}
 .dsh-ppt-field{display:flex;flex-direction:column;gap:4px;}
 .dsh-ppt-field>label{font-size:11px;color:var(--dsw-alias-label-secondary,#888);}

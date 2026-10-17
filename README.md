@@ -19,7 +19,9 @@
 | **多选 / 批量** | `Shift/Ctrl + 点击` 增删；属性面板出现「批量对齐」（左右/居中/顶底/水平等距） |
 | **选整页** | 点击页面缩略图左上角「整页」，一次选中该页全部元素（对应 WorkBuddy 的「选页做 AI 编辑」） |
 | **拖拽打开** | 把 `.pptx` 直接拖到面板上即可打开；拖拽时整块界面给出投放提示 |
-| **可拖动浮窗** | 面板标题栏可拖动、右下角可缩放，位置与尺寸记忆在 localStorage |
+| **可拖动浮窗** | 面板标题栏可拖动、右下角可缩放，位置与尺寸记忆在 localStorage。**启动时一律最小化**（只留右下角「PPT 画布」入口），打开文稿也不会自动弹出来挡界面 |
+| **对话转播** | 右侧把当前会话的对话内容按普通对话形式转播（你 / AI 两条角色），推理过程弱化为附注；不再拆成「思考过程 / 回复」两栏 |
+| **PPT 意图提示** | 会话里提到做/改 PPT（PPT、演示文稿、幻灯片…）且画布没打开时，右下角弹出「看起来你在做 PPT · 打开画布 / 不用了」；插件自己发的指令不会触发 |
 | **自然语言指令** | 指令框输入要求，`Enter` 直接发送（`Shift+Enter` 换行）；「加入待发」可把多条攒起来一起发 |
 | **选区上下文** | 选中元素的**位置、尺寸、样式、层级 z、文本内容**随指令一起交给 AI（不需要截图或复述内容） |
 | **AI 修改方案** | AI 通过 `ppt_canvas_context` 取回选区，产出 `ops` 数组，再用 `ppt_canvas_apply` 落盘；复杂方案可先 `dryRun` 试算 |
@@ -170,14 +172,14 @@ node tools/sync-plugin.mjs
 node tools/test-all.mjs
 ```
 
-七个套件 + 一个同步校验，全绿才算通过（当前 **135 项全绿**）：
+七个套件 + 一个同步校验，全绿才算通过（当前 **137 项全绿**）：
 
 | 套件 | 项数 | 覆盖 |
 |     |     |     |
 | `tests/engine.test.mjs` | 35 | XML 往返、zip 字节级往返、fixture 解析、补丁应用与回读、校验失败不落盘、`dryRun`、撤销/重做字节还原、CJK 空格保真、未触碰页字节不变、母版文本继承、占位符二级几何继承、逐页主题索引（多母版取色）、文字样式保真（逐段/空行/diff）、fill/line/文本类 op 的能力校验 |
 | `tests/api.test.mjs` | 33 | 真实 `node:http` 服务器 + 全链路：open → deck → context → apply(dryRun) → apply → history → staleRev → undo/redo → media → selftest；外部改动检测与 `staleFile`、并发写、`/api/files`、render 令牌与越界、非 loopback 拒绝、CSRF（来源白名单 + JSON content-type）、坏 JSON |
 | `tests/concurrency.test.mjs` | 8 | 并发 apply 不丢改动、失败不阻断队列、undo 走同一队列、写盘失败不推进游标、包解析缓存失效、context 大小上限、deck LRU |
-| `tests/client-harness.mjs` | 18 | 客户端 bundle 冒烟：经典脚本形态、CSS/应用层内联、factory 导出形状、插槽注册、浮窗最小化/展开、标题栏拖动、无选中时发送禁用、会话菜单能渲染、AI 面板多状态、外部改动轮询触发的自动重载、发送后 sending 及时释放、文件对话框取消能收尾、就地编辑器 ×zoom 定位、失焦提交与无变化守卫、独立窗口入口确已移除 |
+| `tests/client-harness.mjs` | 18 | 客户端 bundle 冒烟：经典脚本形态、CSS/应用层内联、factory 导出形状、插槽注册、浮窗最小化/展开、标题栏拖动、无选中时发送禁用、会话菜单能渲染、AI 面板多状态（对话转播/空态/折叠）、默认最小化、PPT 意图提示卡、外部改动轮询触发的自动重载、发送后 sending 及时释放、文件对话框取消能收尾、就地编辑器 ×zoom 定位、失焦提交与无变化守卫、独立窗口入口确已移除 |
 | `tests/css.test.mjs` | 4 | CSS 模板结构：大括号配对、规则头未被注释/连接符截断、关键规则仍存在、注释成对 |
 | `tests/no-window.test.mjs` | 6 | 独立窗口已移除的回归：窗口模块与 bundle 均已删除、归档文件仍可恢复、host 无窗口路由/启动器残留、面板无入口按钮、`ppt_canvas_window` 已注销、`/api/window` 明确 404 |
 | `tests/host-load.test.mjs` | 10 | 安装后加载：`plugin/` 自包含导入、只允许 `./` `node:`、`plugin/index.js` 不得存在（会遮蔽入口）、`apply(ctx)` 装配路由与 4 个工具、缺 `webServer` 时优雅降级、工具可执行、`/api/requests` 诊断、profile 安装位置可解析 |

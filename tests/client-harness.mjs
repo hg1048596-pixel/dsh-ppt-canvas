@@ -512,14 +512,22 @@ function renderFloating() {
   return renderComponent(floating.type, floating.props)
 }
 
+/** 在最小化态里找到「PPT 画布」入口按钮（它现在包在一个定位容器里）。 */
+function findLauncher(element) {
+  const buttons = []
+  // 注意按 class **token** 精确匹配：容器是 dsh-ppt-launcherwrap，
+  // 用 includes('dsh-ppt-launcher') 会把容器也算成按钮。
+  collectElements(element, node => typeof node.type === 'string'
+    && String(node.props?.className ?? '').split(/\s+/).includes('dsh-ppt-launcher'), buttons)
+  return buttons
+}
+
 /** 确保面板处于打开状态（第一次通过真实点启动器打开），返回打开后的浮窗元素。 */
 function openPanelViaLauncher() {
   if (exposedStore.get().open !== true) {
     const closed = renderFloating()
-    const tag = app.__forTests.renderToTag(closed)
-    assertEqual(tag, 'button', `minimized panel must render a launcher button (got ${String(tag)})`)
-    const launcher = resolveToHost(closed)
-    assert(String(launcher.props.className).includes('dsh-ppt-launcher'), 'launcher class present')
+    const launcher = findLauncher(closed)[0]
+    assert(launcher !== undefined, 'minimized panel must render a launcher button')
     launcher.props.onClick()
   }
   const opened = renderFloating()
@@ -547,9 +555,11 @@ step('client: 浮层面板可渲染出一棵组件树', () => {
 
 step('client: 默认最小化为启动器按钮（不遮挡对话）', () => {
   const rendered = renderFloating()
-  assertEqual(app.__forTests.renderToTag(rendered), 'button', 'minimized renders a button')
-  const launcher = resolveToHost(rendered)
-  assert(String(launcher.props.className).includes('dsh-ppt-launcher'), 'launcher class present')
+  // 最小化态现在是一个定位容器 + 入口按钮（容器用来挂「要不要打开画布」提示卡）
+  assertEqual(app.__forTests.renderToTag(rendered), 'div', 'minimized renders a wrapper')
+  const launchers = findLauncher(rendered)
+  assertEqual(launchers.length, 1, 'exactly one launcher button')
+  assertEqual(exposedStore.get().open, false, '启动时画布必须是收起状态（不自动展开）')
 })
 
 step('client: 点启动器后渲染完整浮窗（拖动条 + 缩放把手 + 面板）', () => {
@@ -674,20 +684,34 @@ step('client: AI 思考/回复面板能渲染（多种状态都不抛错）', ()
     return texts.join(' | ')
   }
 
-  const emptyText = render({ thinking: '', reply: '', error: null })
+  const emptyText = render({ messages: [], thinking: '', reply: '', error: null })
   assert(emptyText.includes('AI 思考与回复'), `the pane title renders (got: ${emptyText.slice(0, 120)})`)
-  assert(emptyText.includes('思考过程'), 'the thinking section renders')
-  assert(emptyText.includes('（还没有回复）'), 'the empty reply placeholder renders')
+  assert(!emptyText.includes('思考过程'), '不再有独立的「思考过程」分区（改成对话转播）')
+  assert(!emptyText.includes('（还没有回复）'), '不再有「还没有回复」占位（改成对话空状态）')
 
-  const filled = render({ thinking: '先看选区…', reply: '已把标题改成红色。', error: null })
-  assert(filled.includes('先看选区…'), 'the thinking text renders')
-  assert(filled.includes('已把标题改成红色。'), 'the reply text renders')
+  // 对话转播：用户与助手各成一条消息，顺序保留
+  const conversation = render({
+    messages: [
+      { role: 'user', text: '把标题改成红色' },
+      { role: 'assistant', text: '已把标题改成红色。', thinking: '先看选区…' },
+    ],
+    thinking: '先看选区…',
+    reply: '已把标题改成红色。',
+    error: null,
+  })
+  assert(conversation.includes('把标题改成红色'), '用户消息要显示出来')
+  assert(conversation.includes('已把标题改成红色。'), '助手消息要显示出来')
+  assert(conversation.includes('你'), '用户消息有「你」的角色标签')
+  assert(conversation.includes('AI'), '助手消息有「AI」的角色标签')
+  assert(conversation.includes('先看选区…'), '推理内容仍可见（弱化为附注）')
+  assert(conversation.indexOf('把标题改成红色') < conversation.indexOf('已把标题改成红色。'),
+    '消息顺序必须与对话一致（用户在前）')
 
-  const errored = render({ thinking: '', reply: '', error: '事件源不可用' })
+  const errored = render({ messages: [], thinking: '', reply: '', error: '事件源不可用' })
   assert(errored.includes('事件源不可用'), 'the error state renders')
 
   // 折叠态：只剩一条贴边竖条，不能再占画布宽度
-  const collapsed = render({ thinking: '先看选区…', reply: '已把标题改成红色。', error: null }, true)
+  const collapsed = render({ messages: [{ role: 'user', text: '把标题改成红色' }], thinking: '', reply: '', error: null }, true)
   assert(collapsed.includes('AI 思考与回复'), 'the collapsed strip keeps the label')
   assert(!collapsed.includes('先看选区…'), 'collapsed state must not render the content')
   assert(!collapsed.includes('已把标题改成红色。'), 'collapsed state must not render the reply')
@@ -986,6 +1010,113 @@ step('client: watchAi 在 ready 解析前卸载 → 不得再订阅（回归：�
 
   assertEqual(retainStats.subscribe, 0, '卸载后不得再订阅事件源（否则永不取消 → 串扰）')
   assertEqual(emitted.length, 0, '卸载后不得再向面板推送 AI 内容')
+
+  retainPlan = null
+})
+
+step('client: 用户提到做/改 PPT → 最小化状态下弹出「是否打开画布」提示', async () => {
+  // 需求：当用户提到制作或修改 PPT 时，弹出是否打开画布的提示。
+  // 实现要点：监听必须挂在 FloatingPanel 上（最小化时页面内的 Panel 不渲染），
+  // 且插件自己发的指令（带【PPT 协同编辑】）不能触发提示。
+  exposedStore.set(current => ({ ...current, open: false, sessionId: 'sess-1', pptPrompt: null }))
+
+  // 让会话事件流里出现一条用户消息
+  const entries = [{ kind: 'event', event: { type: 'user/message', data: { content: [{ type: 'text', text: '帮我做一份季度复盘的 PPT' }] } } }]
+  retainPlan = () => ({
+    ready: Promise.resolve({
+      session: { prompt: async () => ({ ok: true }) },
+      eventSource: {
+        getSnapshot: () => ({ entries }),
+        subscribe: () => () => {},
+      },
+    }),
+    release: () => {},
+  })
+
+  const tree = renderFloating()
+  await scheduler.flush(1)
+  // 提示卡应当出现（此时面板仍是收起的）
+  const afterDetect = renderFloating()
+  const textOf = (node, depth = 0) => {
+    if (node === null || node === undefined || depth > 24) return ''
+    if (typeof node === 'string' || typeof node === 'number') return String(node)
+    if (Array.isArray(node)) return node.map(child => textOf(child, depth + 1)).join(' ')
+    if (typeof node !== 'object') return ''
+    if (typeof node.type === 'function') return textOf(renderComponent(node.type, node.props), depth + 1)
+    return textOf(node.props?.children, depth + 1)
+  }
+  const promptText = textOf(afterDetect)
+  assert(promptText.includes('看起来你在做 PPT'), `应弹出提示卡（实际：${promptText.slice(0, 160)}）`)
+  assertEqual(exposedStore.get().open, false, '提示出现时画布仍应是收起状态')
+  void tree
+
+  // 点「打开画布」→ 面板展开、提示消失
+  const card = exposedStore.get().pptPrompt
+  assert(card !== null && typeof card.text === 'string', 'pptPrompt 里应记录触发它的原话')
+  const openButton = []
+  collectElements(afterDetect, node => node.type === 'button'
+    && /打开画布/.test(String(node.props?.children ?? '')), openButton)
+  assert(openButton.length === 1, '提示卡里应有「打开画布」按钮')
+  openButton[0].props.onClick()
+  assertEqual(exposedStore.get().open, true, '点「打开画布」应展开面板')
+  assertEqual(exposedStore.get().pptPrompt, null, '点开后提示应消失')
+
+  // 插件自己发的指令不得触发提示
+  exposedStore.set(current => ({ ...current, open: false, pptPrompt: null }))
+  const selfEntries = [{ kind: 'event', event: { type: 'user/message', data: { content: [{ type: 'text', text: '【PPT 协同编辑】我在 PPT 画布上选中了 1 个元素：\n- 标题' }] } } }]
+  retainPlan = () => ({
+    ready: Promise.resolve({
+      session: { prompt: async () => ({ ok: true }) },
+      eventSource: { getSnapshot: () => ({ entries: selfEntries }), subscribe: () => () => {} },
+    }),
+    release: () => {},
+  })
+  // 重新挂一次订阅（删掉旧组件树，让 effect 重新执行）
+  exposedStore.set(current => ({ ...current, sessionId: 'sess-2' }))
+  renderFloating()
+  await scheduler.flush(1)
+  assertEqual(exposedStore.get().pptPrompt, null, '插件自己发的指令不应触发提示')
+
+  retainPlan = null
+  exposedStore.set(current => ({ ...current, open: false, sessionId: '', pptPrompt: null }))
+})
+
+step('client: 会话事件 → 对话消息（用户/助手/实时分片按顺序还原）', async () => {
+  // 需求 1 的核心：把事件流还原成一条条消息，而不是只剩"最后一轮"。
+  const entries = [
+    { kind: 'event', event: { type: 'user/message', data: { content: [{ type: 'text', text: '第一问：把标题改红' }] } } },
+    { kind: 'event', event: { type: 'assistant/message', data: { message: { content: [
+      { type: 'reasoning', text: '先定位标题占位符。' },
+      { type: 'text', text: '好的，已改红。' },
+    ] } } } },
+    { kind: 'event', event: { type: 'user/message', data: { content: [{ type: 'text', text: '第二问：字号调大' }] } } },
+    { kind: 'transient', event: { data: { chunk: { type: 'text-delta', index: 0, text: '正在调整字号' } } } },
+    { kind: 'transient', event: { data: { chunk: { type: 'text-delta', index: 0, text: '…' } } } },
+  ]
+  retainPlan = () => ({
+    ready: Promise.resolve({
+      session: { prompt: async () => ({ ok: true }) },
+      eventSource: { getSnapshot: () => ({ entries }), subscribe: () => () => {} },
+    }),
+    release: () => {},
+  })
+
+  const seen = []
+  const off = app.__forTests.watchAi('sess-tr', next => seen.push(next))
+  await scheduler.flush(1)
+  off()
+
+  assert(seen.length > 0, 'watchAi 应至少回调一次')
+  const last = seen[seen.length - 1]
+  assert(Array.isArray(last.messages), 'emit 里应带 messages 数组')
+  const roles = last.messages.map(message => message.role)
+  assertEqual(roles.join(','), 'user,assistant,user,assistant', `消息顺序应为 user,assistant,user,assistant（实际 ${roles.join(',')}）`)
+  assertEqual(last.messages[0].text, '第一问：把标题改红')
+  assertEqual(last.messages[1].text, '好的，已改红。', '助手正文应只取 text 块')
+  assertEqual(last.messages[1].thinking, '先定位标题占位符。', '推理应单独挂在该消息上')
+  // 实时分片合并成最后一条（标记 live，界面显示"生成中"）
+  assertEqual(last.messages[3].text, '正在调整字号…', '实时分片应按 index 拼成一条')
+  assertEqual(last.messages[3].live, true, '实时消息应标记 live')
 
   retainPlan = null
 })
