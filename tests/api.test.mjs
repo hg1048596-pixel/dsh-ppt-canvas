@@ -465,6 +465,37 @@ await step('api: force 重载后可以继续写入', async () => {
   assertEqual(status.payload.value.changed, false, '写入后 mtime 应已同步')
 })
 
+await step('api: render 必须带令牌（挡住跨站 <img> 触发的 DoS）', async () => {
+  // render 是 GET 且有重副作用（spawn LibreOffice）。跨站 `<img src=...>` 不带 Origin，
+  // 所以 Origin 白名单管不到它 —— 令牌是唯一能区分「我们自己的画布」与「别处的图片标签」的东西。
+  const noToken = await fetch(`${base}/api/render?page=1&w=320`)
+  assertEqual(noToken.status, 403, '无令牌的 render 必须被拒')
+  const payload = await noToken.json()
+  assertEqual(payload.error.code, 'forbiddenOrigin')
+
+  const badToken = await fetch(`${base}/api/render?page=1&w=320&t=not-a-real-token`)
+  assertEqual(badToken.status, 403, '错误令牌也必须被拒')
+})
+
+await step('api: status 会下发 render 令牌，且令牌可用于 render', async () => {
+  const { payload } = await api('api/status')
+  const token = payload.value.renderToken
+  assert(typeof token === 'string' && token.length >= 16, `status 应下发 renderToken，实际 ${JSON.stringify(token)}`)
+
+  // 带令牌的请求不该再被 403（这里只验证鉴权通过；真实渲染依赖 LibreOffice）
+  const response = await fetch(`${base}/api/render?page=1&w=320&t=${encodeURIComponent(token)}`)
+  assert(response.status !== 403, '带正确令牌不应被 403')
+})
+
+await step('api: render 页号越界返回 404（不静默夹到最后一页）', async () => {
+  const { payload } = await api('api/status')
+  const token = payload.value.renderToken
+  const response = await fetch(`${base}/api/render?page=999&w=320&t=${encodeURIComponent(token)}`)
+  assertEqual(response.status, 404, '越界页号必须是 404')
+  const bad = await fetch(`${base}/api/render?page=1.5&w=320&t=${encodeURIComponent(token)}`)
+  assertEqual(bad.status, 400, '非整数页号必须是 400')
+})
+
 // ---- 收尾 ----
 // Node 的 fetch 保持 keep-alive；只 close() 会让进程一直挂到对端超时。
 server.closeAllConnections?.()

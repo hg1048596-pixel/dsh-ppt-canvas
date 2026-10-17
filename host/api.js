@@ -6,6 +6,8 @@
 //  - 只读写用户显式打开的那个 .pptx 与插件自己的临时目录；
 //  - 不做任何目录遍历，媒体只按 deck 注册过的 mediaId 取。
 
+import { randomUUID } from 'node:crypto'
+
 import { DeckError } from './deck-store.js'
 
 const PREFIX = '/dsh-ppt'
@@ -23,6 +25,29 @@ const MAX_BODY_BYTES = 128 * 1024 * 1024
  */
 const REQUEST_LOG = []
 const REQUEST_LOG_LIMIT = 40
+
+/**
+ * 渲染接口的会话令牌。
+ *
+ * GET + 重副作用（spawn LibreOffice）不能只靠 Origin 白名单：`<img>` 不发 Origin。
+ * 令牌放在 /api/status 的响应里 —— 那个响应受 CORS 保护，只有白名单来源能读，
+ * 跨站页面拿不到令牌，也就没法构造 render URL。
+ */
+const renderToken = (() => {
+  try {
+    return randomUUID().replace(/-/g, '')
+  } catch {
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
+  }
+})()
+
+/**
+ * render 串行化：同时只允许一个 LibreOffice 进程。
+ *
+ * 不加限制的话，快速切页 / 多标签页会把 soffice 起一堆，互相抢同一个 profile
+ * （实测会卡住或产出空文件），并且很容易拖满 CPU。
+ */
+let renderQueue = Promise.resolve()
 
 /**
  * 允许的来源：本应用自己的渲染进程，以及任意 loopback 页面。
@@ -192,7 +217,9 @@ async function handleGet(name, url, res, store, bus, logger) {
   switch (name) {
     case 'status':
       // 轻量状态：客户端轮询「外部程序是否改过文件」用（只 stat，不解析包）。
-      send(res, 200, { ok: true, value: store.status() })
+      // 同时下发 render 令牌 —— 这个响应受 CORS 保护（只有白名单来源能读），
+      // 所以跨站页面拿不到它，也就构造不出 render URL。
+      send(res, 200, { ok: true, value: { ...store.status(), renderToken } })
       return
     case 'deck':
       send(res, 200, { ok: true, value: store.view() })
@@ -226,17 +253,39 @@ async function handleGet(name, url, res, store, bus, logger) {
     case 'render': {
       // 精确渲染：用 LibreOffice 把某一页渲染成 PNG（见 host/render.js）。
       // 画布用它替代 DOM 近似重画，观感与真实文件一致。
+      //
+      // **为什么需要令牌**：这是 GET 且有重副作用（每次 spawn 一个 LibreOffice）。
+      // 跨站页面用 `<img src="http://127.0.0.1:19488/dsh-ppt/api/render?page=1">`
+      // 就能触发它 —— `<img>` 不带 Origin，所以 Origin 白名单管不到，
+      // 反复请求即可把用户机器拖垮。令牌只能通过**可读响应**（/api/status，受 CORS
+      // 保护）拿到，跨站页面读不到，于是这条路被堵住。
+      const token = url.searchParams.get('t') ?? ''
+      if (token !== renderToken) {
+        send(res, 403, {
+          ok: false,
+          error: { code: 'forbiddenOrigin', message: 'render requires the session token (see GET /api/status)' },
+        })
+        return
+      }
       const page = Number(url.searchParams.get('page') ?? 1)
       const width = Math.min(4096, Math.max(320, Number(url.searchParams.get('w') ?? 1600) || 1600))
-      if (!Number.isFinite(page) || page < 1) {
-        send(res, 400, { ok: false, error: { code: 'badRequest', message: 'page must be >= 1' } })
+      if (!Number.isInteger(page) || page < 1) {
+        send(res, 400, { ok: false, error: { code: 'badRequest', message: 'page must be an integer >= 1' } })
         return
       }
       const open = store.requireCurrent()
       const { loadPackage } = await import('./pptx-read.js')
       const { renderSlidePng } = await import('./render.js')
       const pkg = loadPackage(new Uint8Array(open.buffer))
-      const result = await renderSlidePng({
+      if (!Number.isInteger(page) || page > pkg.slideParts.length) {
+        send(res, 404, {
+          ok: false,
+          error: { code: 'notFound', message: `page ${page} is out of range (1..${pkg.slideParts.length})` },
+        })
+        return
+      }
+      // 串行化：排队执行，避免多个 soffice 抢同一个 profile。
+      const task = renderQueue.then(() => renderSlidePng({
         file: open.filePath,
         entries: pkg.entries,
         page,
@@ -245,7 +294,9 @@ async function handleGet(name, url, res, store, bus, logger) {
         // 文件名与显示页序不一致，按 slide${page}.xml 取会渲染错页。
         slideParts: pkg.slideParts,
         logger,
-      })
+      }))
+      renderQueue = task.then(() => undefined, () => undefined)
+      const result = await task
       res.writeHead(200, {
         'content-type': 'image/png',
         'content-length': String(result.buffer.length),

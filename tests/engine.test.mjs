@@ -451,6 +451,79 @@ check('read: 占位符没有 a:xfrm 时从 slideLayout 继承几何（否则是 
   )
 })
 
+check('patch: setLine 只给 width 时不得丢掉原有线色', () => {
+  // 以前 setLine 无条件 removeChildren(ln,'a:solidFill')，于是 {width:3} 会把
+  // #CCCCCC 的线静默变成默认黑 —— 一次不可见的样式破坏。
+  const before = readFileSync(deckPath)
+  const deck = readDeck(before, deckPath, 0)
+  const lineShape = deck.slides[0].shapes.find(shape => shape.kind === 'line')
+  assert(lineShape !== undefined, 'fixture 里应有一条线（用它的颜色做断言）')
+  const originalColor = lineShape.style.line === null ? null : lineShape.style.line.color
+  assert(originalColor !== null, '这条线原本应有颜色')
+
+  const result = applyPatch(before, deck, deckPath, {
+    summary: '只改线宽',
+    ops: [{ op: 'setLine', id: lineShape.id, width: 3 }],
+  }, {})
+  const after = readDeck(result.buffer, deckPath, 1)
+  const afterLine = after.slides[0].shapes.find(shape => shape.id === lineShape.id)
+  assertEqual(afterLine.style.line.color, originalColor, '只改宽度时颜色必须保留')
+})
+
+check('patch: bringToFront 不把形状插到 p:extLst 之后（schema 必须合法）', () => {
+  // p:spTree 的 p:extLst 必须是最后一个子元素。以前 at === remaining.length 时
+  // insertBefore 退化成 append，形状跑到 extLst 后面。
+  const before = readFileSync(deckPath)
+  const deck = readDeck(before, deckPath, 0)
+  const first = deck.slides[0].shapes[0]
+  const result = applyPatch(before, deck, deckPath, {
+    summary: '置顶',
+    ops: [{ op: 'bringToFront', id: first.id }],
+  }, {})
+
+  const entries = readZipEntries(result.buffer)
+  const slideXml = Buffer.from(entries.find(entry => entry.name === 'ppt/slides/slide1.xml').data).toString('utf8')
+  const treeMatch = /<p:spTree>([\s\S]*)<\/p:spTree>/.exec(slideXml)
+  assert(treeMatch !== null, '应能取出 p:spTree')
+  const tree = treeMatch[1]
+  const extLstAt = tree.indexOf('<p:extLst')
+  if (extLstAt !== -1) {
+    // extLst 之后不允许再出现形状起始标签
+    const tail = tree.slice(extLstAt)
+    for (const tag of ['<p:sp>', '<p:pic>', '<p:graphicFrame>', '<p:grpSp>', '<p:cxnSp>']) {
+      assert(!tail.includes(tag), `p:extLst 之后不应再有 ${tag}`)
+    }
+  }
+  assert(true)
+})
+
+check('patch: 连续两次清空空行都保留 endParaRPr 格式（第二次不丢）', () => {
+  // 第一次清空靠 run 的 rPr 克隆；清空后该段只剩 endParaRPr。
+  // 以前第二次清空只看 run → styledRPrOf 返回 undefined → 格式丢失（行高回退）。
+  const before = readFileSync(deckPath)
+  const deck = readDeck(before, deckPath, 0)
+  const body = deck.slides[0].shapes.find(shape => shape.text !== null && shape.text.paragraphs.length >= 2)
+  assert(body !== undefined, '需要一个多段落的文本框')
+
+  const clearOnce = applyPatch(before, deck, deckPath, {
+    summary: '清空第一段',
+    ops: [{ op: 'setText', id: body.id, paragraphs: [{ runs: [] }, ...body.text.paragraphs.slice(1).map(p => ({ runs: p.runs.map(r => ({ text: r.text })) }))] }],
+  }, {})
+  const deck2 = readDeck(clearOnce.buffer, deckPath, 1)
+  const clearTwice = applyPatch(clearOnce.buffer, deck2, deckPath, {
+    summary: '再清空第一段',
+    ops: [{ op: 'setText', id: body.id, paragraphs: [{ runs: [] }, ...body.text.paragraphs.slice(1).map(p => ({ runs: p.runs.map(r => ({ text: r.text })) }))] }],
+  }, {})
+
+  const entries = readZipEntries(clearTwice.buffer)
+  const slideXml = Buffer.from(entries.find(entry => entry.name === 'ppt/slides/slide1.xml').data).toString('utf8')
+  // 找出该形状段落里是否有 endParaRPr（第二次清空后仍应保留）
+  const spMatch = new RegExp(`<p:cNvPr id="${body.shapeId}"[\\s\\S]*?</p:sp>`).exec(slideXml)
+  assert(spMatch !== null, '应能定位到该形状')
+  const hasEndPara = /<a:endParaRPr[\s>]/.test(spMatch[0])
+  assert(hasEndPara, '连续两次清空后仍应保留 a:endParaRPr（否则行高/字号回退）')
+})
+
 // ---------------------------------------------------------------- 补丁
 
 check('patch: 混合补丁应用后回读一致', () => {

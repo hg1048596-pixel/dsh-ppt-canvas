@@ -204,9 +204,18 @@ function createPptApp(options) {
    * 与媒体图不同，这里**不**做双通道兜底：渲染是先请求、失败再退回 DOM 重画
    * （见 CanvasPane 的 onError），比换地址更直接、也更快给出可用画面。
    */
+  /**
+   * render 的会话令牌（由 /api/status 下发）。
+   *
+   * render 是 GET 且有重副作用（起 LibreOffice），跨站 `<img>` 就能触发；
+   * 令牌只能通过受 CORS 保护的响应拿到，所以跨站页面拿不到。
+   * 拿不到令牌时先不带 —— 服务端会 403，画布按 onError 退回内置重画。
+   */
+  let renderTokenValue = ''
+
   function renderUrl({ page, width, rev }) {
     const base = channelChoice === 'standalone' ? STANDALONE : API
-    const query = `page=${page}&w=${width}&rev=${rev}`
+    const query = `page=${page}&w=${width}&rev=${rev}${renderTokenValue === '' ? '' : `&t=${encodeURIComponent(renderTokenValue)}`}`
     return `${base}/render?${query}`
   }
 
@@ -2545,6 +2554,11 @@ function createPptApp(options) {
         try {
           const status = await callApi('status')
           if (stopped) return
+          // 顺便收下 render 令牌（首个轮询通常就能拿到；画布首帧可能还没带上，
+          // 那一帧会 403 然后退回内置重画，下一帧自动恢复精确渲染）。
+          if (typeof status.renderToken === 'string' && status.renderToken !== '') {
+            renderTokenValue = status.renderToken
+          }
 
           if (status.changed === true) {
             // 就地编辑中不抢画面：只提示一次，等编辑结束再处理。

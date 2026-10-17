@@ -470,7 +470,13 @@ function setFill(element, color) {
   else insertBefore(spPr, node, ln)
 }
 
-/** 设置描边。color = null 时写 a:ln/a:noFill。 */
+/**
+ * 设置描边。color = null 时写 a:ln/a:noFill。
+ *
+ * **必须是"未提供的字段不动"**：只传 width 时不能把已有的颜色删掉
+ * （以前无条件 `removeChildren(ln,'a:solidFill')`，于是 `{width:3}` 会把
+ * #CCCCCC 的线静默变成默认黑色 —— 一次不可见的样式破坏）。
+ */
 function setLine(element, color, width, dash) {
   const spPr = spPrFor(element)
   if (spPr === undefined) return
@@ -479,22 +485,25 @@ function setLine(element, color, width, dash) {
     ln = createElement('a:ln')
     appendChild(spPr, ln)
   }
-  removeChildren(ln, 'a:noFill')
-  removeChildren(ln, 'a:solidFill')
-  removeChildren(ln, 'a:gradFill')
-  removeChildren(ln, 'a:pattFill')
-  removeChildren(ln, 'a:prstDash')
+  // 只有真的要改颜色（给了颜色或明确置空）才动填充
+  if (color !== undefined) {
+    removeChildren(ln, 'a:noFill')
+    removeChildren(ln, 'a:solidFill')
+    removeChildren(ln, 'a:gradFill')
+    removeChildren(ln, 'a:pattFill')
+  }
+  if (dash !== undefined) removeChildren(ln, 'a:prstDash')
   if (width !== undefined) setAttr(ln, 'w', String(pxToEmu(width)))
   if (color === null) {
     appendChild(ln, createElement('a:noFill'))
+    if (dash !== undefined) appendChild(ln, createElement('a:prstDash', { val: dash }))
     return
   }
   if (color !== undefined) {
     ln.children.unshift(solidFillFor(color))
     ln.children[0].parent = ln
   }
-  if (dash !== undefined && dash !== 'solid') appendChild(ln, createElement('a:prstDash', { val: dash }))
-  else if (dash === 'solid') appendChild(ln, createElement('a:prstDash', { val: 'solid' }))
+  if (dash !== undefined) appendChild(ln, createElement('a:prstDash', { val: dash }))
 }
 
 /** 确保 a:rPr 存在。 */
@@ -627,9 +636,15 @@ function setTextBody(element, paragraphs) {
       // 全被推下去。OOXML 里空行就是不带 run 的 <a:p/>。
       // 例外：这一行**原本**有带格式的文字（被用户清空）——用 endParaRPr
       // 克隆原格式保住行高，这正是 PowerPoint 存"清空的行"的方式。
+      //
+      // 还要看 source 自己的 `a:endParaRPr`：第一次清空后该段就只剩 endParaRPr，
+      // 第二次清空时 styledRPrOf(source)（只看 run）返回 undefined，
+      // 于是格式被丢掉 —— 行高/字号/颜色回退（"连续清空两次格式没了"）。
       const prevStyled = styledRPrOf(source)
-      if (prevStyled !== undefined) {
-        const endPara = cloneElement(prevStyled)
+      const prevEndPara = source === undefined ? undefined : childOf(source, 'a:endParaRPr')
+      const inherited = prevStyled ?? (carriesFormatting(prevEndPara) ? prevEndPara : undefined)
+      if (inherited !== undefined) {
+        const endPara = cloneElement(inherited)
         endPara.name = 'a:endParaRPr'
         appendChild(p, endPara)
       }
@@ -1023,7 +1038,12 @@ export function applyPatch(buffer, deck, filePath, rawPatch, options = {}) {
         if (op.op === 'bringToFront') at = remaining.length
         else if (op.op === 'sendToBack') at = 0
         else at = Math.max(0, Math.min(remaining.length, op.z))
-        const reference = remaining[at]
+        // `at === remaining.length` 时 reference 是 undefined，insertBefore 会退化成
+        // 「追加到末尾」。但 p:spTree 的 `p:extLst` 必须是**最后一个**子元素，
+        // 追加到它后面就是非法 schema（PowerPoint 打开会提示修复）。
+        // 所以位置越界时，改为插到 extLst 之前。
+        const extLst = childOf(spTree, 'p:extLst')
+        const reference = at < remaining.length ? remaining[at] : extLst
         insertBefore(spTree, target.element, reference)
         touchedParts.add(target.partName)
         changed.add(op.id)
