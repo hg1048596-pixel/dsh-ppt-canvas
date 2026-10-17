@@ -129,7 +129,7 @@
 ## 9. 复核方式
 
 ```powershell
-$node = "C:\Users\Hanson Gao\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+$node = "C:\Users\<user>\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
 $dev  = "D:\deepseek harness plugin\dsh-ppt-canvas"
 
 & $node "$dev\tools\test-all.mjs"              # 135 项；缺 LibreOffice 会显示 SKIP 且非 0

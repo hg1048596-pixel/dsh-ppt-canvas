@@ -3,8 +3,11 @@ debug/
 # 独立窗口时期的 Electron 探针（功能已移除）
 .windowtest/
 # 从 app.asar 抽出的宿主源码/探针产物（只读参考，体积大）
+# 注意：tools/_*.js 是 DeepSeek 插件自身的 bundle/生成物（第三方代码），
+# 只在本地排查时由 tools/asar-extract.mjs 重新抽出，**不进仓库**。
 tools/.probe/
 tools/_scdir/
+tools/_*.js
 # 依赖
 node_modules/
 # 系统杂物

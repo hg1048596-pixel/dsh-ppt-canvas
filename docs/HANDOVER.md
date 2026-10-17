@@ -3,7 +3,7 @@
 > 给接手的 agent。本文档只写**实测验证过的**事实，凡属推测会明确标注。
 > 最后更新：2026-10-17，由完成了「原生 PPT 级就地编辑」十轮迭代的 agent 写下。
 > 逐轮的详细过程记录在 WorkBuddy 工作区日志：
-> `C:\Users\Hanson Gao\WorkBuddy\2026-10-15-00-23-54\.workbuddy\memory\2026-10-15.md`
+> `C:\Users\<user>\WorkBuddy\2026-10-15-00-23-54\.workbuddy\memory\2026-10-15.md`
 
 ---
 
@@ -28,12 +28,12 @@
 |---|---|
 | 工作区（插件开发树） | `D:\deepseek harness plugin\dsh-ppt-canvas` |
 | DSH checkout | `D:\deepseek harness desktop official\resources\app.asar\dsh\` |
-| DSH profile | `C:\Users\Hanson Gao\.dsh\profiles\desktop` |
+| DSH profile | `C:\Users\<user>\.dsh\profiles\desktop` |
 | 插件安装位置 | `<profile>\node_modules\dsh-ppt-canvas` |
 | 安装方式 | `package.json` 里 `"dsh-ppt-canvas": "link:..."`（junction，**不是拷贝**） |
 | GUI | `http://127.0.0.1:19387`（有鉴权，401；自动化测试别走这条路，见 4.7） |
 | 独立通道（插件自起 HTTP） | `http://127.0.0.1:19488`（占用则顺延 19489-19492） |
-| Node | `C:\Users\Hanson Gao\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe` |
+| Node | `C:\Users\<user>\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe` |
 | 版本控制 | **有 git 了**（2026-10-15 初始化，逐轮提交）。提交身份用 `git -c user.name=... -c user.email=...` 临时指定，**不要动全局配置** |
 
 ### 2.1 五个必须知道的坑
@@ -94,7 +94,7 @@
 ## 3. 命令速查
 
 ```powershell
-$node = "C:\Users\Hanson Gao\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+$node = "C:\Users\<user>\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
 $dev  = "D:\deepseek harness plugin\dsh-ppt-canvas"
 
 # 全部测试 + 同步检查（健康度基线）
@@ -169,7 +169,7 @@ dsh-ppt-canvas/
 ```
 
 **外部复现环境（本任期搭建，WorkBuddy 托管 node 工作区）**：
-`C:\Users\Hanson Gao\.workbuddy\binaries\node\workspace\`
+`C:\Users\<user>\.workbuddy\binaries\node\workspace\`
 - 已装：react@18.3.1、react-dom、jsdom、playwright-core；系统 Chrome 在
   `C:/Program Files/Google/Chrome/Application/chrome.exe`（playwright 用 `executablePath` 指定）
 - `repro-server.mjs`：静态页挂 bundle + React UMD + 用户 deck；**/real-apply 跑真 applyPatch**（真实写入管线）；bundle 每请求从磁盘读（改 client 刷新即生效）
@@ -297,7 +297,7 @@ op 里显式给的样式字段（color/fontSize/…）一律优先于映射结�
 
 | 检查 | 结果 | 含义 |
 |---|---|---|
-| `debug/repro.pptx`（10-15 00:52 副本）与 `C:\Users\Hanson Gao\Desktop\Industrial_Agents_Cognitive_Manufacturing.pptx` 的 SHA256 | **完全相同** | 自副本以来文件未被写过 |
+| `debug/repro.pptx`（10-15 00:52 副本）与 `C:\Users\<user>\Desktop\Industrial_Agents_Cognitive_Manufacturing.pptx` 的 SHA256 | **完全相同** | 自副本以来文件未被写过 |
 | 桌面原件文件系统 mtime | **2026-02-04 20:10**（10 月从未变过） | `writeAtomic` 用 `writeFile`+`rename`、**不保留 mtime**，写过就必然是 10 月 |
 | 撤销历史快照目录是否有该文件的 key（`8f70718f52d8`） | **没有**（目录里只有 4 个别的 key） | 历史在首次落盘时创建；没有 = 从没 apply 过补丁 |
 | 文本层面 | p3 的 `'t o`（多出空格）、p1 的 `technologies   enables` | 样式边界 bug **只改字符归属哪个 run，不会增删字符** |
@@ -351,7 +351,7 @@ p10 同理），`'Automated't o` 这类是**作者原始笔误**，都早于插�
 ## 7. 一次典型改动的完整流程
 
 ```powershell
-$node = "C:\Users\Hanson Gao\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
+$node = "C:\Users\<user>\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\node\bin\node.exe"
 $dev  = "D:\deepseek harness plugin\dsh-ppt-canvas"
 
 # 1) 只改 host/ 与 client/（plugin/ 是 sync 产物）

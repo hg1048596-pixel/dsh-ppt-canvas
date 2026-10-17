@@ -194,7 +194,7 @@ fixture 由 `tools/build-demo-pptx.py`（python pptx，仅用于造测试素材�
 插件本身运行时不依赖 Python。
 
 ```powershell
-$py = "C:\Users\Hanson Gao\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+$py = "C:\Users\<user>\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
 & $py tools/build-demo-pptx.py tests/fixtures/demo.pptx
 ```
 

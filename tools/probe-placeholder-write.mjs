@@ -13,7 +13,7 @@
 // 默认用系统里一份带占位符的真实模板；找不到就明确报错。
 
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -24,8 +24,9 @@ import { readZipEntries } from '../host/zip.js'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const CANDIDATES = [
   process.argv[2],
-  'C:/Users/Hanson Gao/Desktop/项目产物/Lenovo 2026 PPT Template.pptx',
-  'C:/Users/Hanson Gao/Desktop/项目产物/联想市场部实习第一周工作报告.pptx',
+  // 有占位符的真实模板（路径可用环境变量 PPT_FIXTURE 覆盖）
+  process.env.PPT_FIXTURE,
+  join(homedir(), 'Desktop', '项目产物', 'Lenovo 2026 PPT Template.pptx'),
   join(HERE, '..', 'tests', 'fixtures', 'demo.pptx'),
 ].filter(Boolean)
 
