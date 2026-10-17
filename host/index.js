@@ -31,6 +31,7 @@ export const inject = []
 export function apply(ctx) {
   const store = new DeckStore()
   const logger = ctx.get('logger') ?? console
+  store.logger = logger
   const tag = '[dsh-ppt-canvas]'
   logger.info?.(`${tag} apply() entered; probing host services…`)
 

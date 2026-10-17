@@ -66,6 +66,8 @@ export class DeckStore {
      * 触发场景：AI 工具调用与客户端提交撞在一起、或两个面板同时编辑。
      */
     this.mutationTail = Promise.resolve()
+    /** 可选 logger（由 host/index.js 注入）；测试里通常为 null。 */
+    this.logger = null
   }
 
   /**
@@ -373,7 +375,19 @@ export class DeckStore {
     try {
       deck = readDeck(nextBuffer, open.filePath, rev)
     } catch (error) {
-      throw new DeckError('ioFailed', `the written presentation cannot be re-read: ${error.message}`)
+      // 文件已经写进去了，但读不回来 —— 此时内存里的 deck 还是**旧的**，
+      // 若继续用它做校验，后续 apply 会拿旧 deck 校验新 buffer（非常隐蔽的错乱）。
+      // 处置：强制从磁盘重载（会清空历史，至少状态自洽），重载也失败就让 current 失效。
+      this.logger?.warn?.(`[dsh-ppt-canvas] cannot re-read ${open.filePath} after write: ${error.message}`)
+      try {
+        await this.open(open.filePath, { force: true })
+      } catch {
+        this.current = null
+        this.decks.delete(open.filePath)
+      }
+      throw new DeckError('ioFailed', `the written presentation cannot be re-read: ${error.message}`, {
+        file: open.filePath,
+      })
     }
     open.deck = deck
     // 与 view() 保持一致：契约声明 Deck 顶层有 fileMtimeMs，
@@ -435,7 +449,8 @@ export class DeckStore {
     await writeAtomic(open.filePath, buffer)
     open.buffer = buffer
     open.mtimeMs = safeMtime(open.filePath)
-    this.history.commitRestore(open.filePath, outcome.rev)
+    // 游标只在**写盘成功之后**推进（history.undo/redo 现在是纯查询）。
+    this.history.commitRestore(open.filePath, outcome.rev, outcome.cursorAfter)
     const deck = readDeck(buffer, open.filePath, outcome.rev)
     open.deck = deck
     deck.fileMtimeMs = open.mtimeMs

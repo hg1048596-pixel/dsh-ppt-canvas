@@ -108,6 +108,41 @@ await check('undo 也走队列（与 apply 不互相踩）', async () => {
   assert(after >= before - 1, `rev 不应异常回退（before=${before} after=${after}）`)
 })
 
+await check('写盘失败不推进撤销游标（内存与磁盘必须一致）', async () => {
+  // 原缺陷：history.undo() 内部直接推进 cursor/rev，而写盘在它之后才发生。
+  // 写盘失败（文件被占用/目录消失/磁盘满）时文件没变、游标却已回退，
+  // 之后的 undo/redo/rev 全部错乱。现在 undo/redo 是纯查询，写成功才 commit。
+  const dir = mkdtempSync(join(tmpdir(), 'ppt-undo-fail-'))
+  const file = join(dir, 'undo.pptx')
+  copyFileSync(FIXTURE, file)
+  const localStore = new DeckStore()
+  await localStore.open(file)
+  const shape = localStore.view().slides[0].shapes.find(item => item.kind !== 'group')
+  await localStore.apply({ summary: '改一笔', ops: [{ op: 'setFill', id: shape.id, color: '#ABC123' }] })
+
+  const revBefore = localStore.view().rev
+  const canUndoBefore = localStore.historyStatus().canUndo
+  assertEqual(canUndoBefore, true, '刚 apply 完应当可以撤销')
+
+  // 让写盘必然失败：把文件所在目录整个删掉
+  rmSync(dir, { recursive: true, force: true })
+
+  let code = null
+  try {
+    await localStore.undo(1)
+  } catch (error) {
+    code = error.code
+  }
+  assertEqual(code, 'ioFailed', `写盘应当失败（got ${code}）`)
+
+  // 关键断言：游标没有动
+  const status = localStore.historyStatus()
+  assertEqual(status.canUndo, canUndoBefore, '写盘失败后 canUndo 不应变化（游标没动）')
+  assertEqual(localStore.view().rev, revBefore, '写盘失败后 rev 不应变化')
+
+  rmSync(dir, { recursive: true, force: true })
+})
+
 rmSync(workDir, { recursive: true, force: true })
 
 console.log('')

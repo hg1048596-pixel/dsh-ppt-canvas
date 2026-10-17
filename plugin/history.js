@@ -117,7 +117,14 @@ export function createHistory() {
       return history
     },
 
-    /** 撤销 steps 步，返回要写回的字节。 */
+    /**
+     * 查询「撤销 steps 步」会得到什么，**不改任何状态**。
+     *
+     * 为什么要拆成 peek + commit：以前这里直接推进 cursor/rev，而写盘在调用方
+     * 之后才发生。写盘失败（文件被占用、磁盘满、staleFile）时文件没变，但内存里
+     * 的游标已经回退了 —— 之后的 undo/redo/rev 全部错乱
+     * （表现为"撤销一次跳到更早的状态"、canUndo 突然变 false）。
+     */
     undo(filePath, steps = 1) {
       const history = ensure(filePath)
       const count = Math.max(1, Math.trunc(steps))
@@ -125,17 +132,18 @@ export function createHistory() {
       const target = history.entries[history.cursor - count + 1]
       const buffer = history.readSnapshot(target.before)
       if (buffer === null) return null
-      history.cursor -= count
-      history.rev = history.cursor < 0 ? 0 : history.entries[history.cursor].rev
+      const cursorAfter = history.cursor - count
+      const rev = cursorAfter < 0 ? 0 : history.entries[cursorAfter].rev
       return {
         buffer,
-        rev: history.cursor < 0 ? Math.max(0, history.rev) : history.entries[history.cursor].rev,
-        canUndo: history.cursor >= 0,
-        canRedo: history.cursor < history.entries.length - 1,
+        rev,
+        cursorAfter,
+        canUndo: cursorAfter >= 0,
+        canRedo: cursorAfter < history.entries.length - 1,
       }
     },
 
-    /** 重做 steps 步。 */
+    /** 查询「重做 steps 步」，同样不改状态。 */
     redo(filePath, steps = 1) {
       const history = ensure(filePath)
       const count = Math.max(1, Math.trunc(steps))
@@ -143,22 +151,25 @@ export function createHistory() {
       const target = history.entries[history.cursor + count]
       const buffer = history.readSnapshot(target.after)
       if (buffer === null) return null
-      history.cursor += count
-      history.rev = history.entries[history.cursor].rev
+      const cursorAfter = history.cursor + count
       return {
         buffer,
-        rev: history.rev,
-        canUndo: history.cursor >= 0,
-        canRedo: history.cursor < history.entries.length - 1,
+        rev: history.entries[cursorAfter].rev,
+        cursorAfter,
+        canUndo: cursorAfter >= 0,
+        canRedo: cursorAfter < history.entries.length - 1,
       }
     },
 
     /**
-     * 撤销/重做写盘后由调用方确认：只推进 rev，不再新增快照。
-     * （游标已在 undo/redo 内移动。）
+     * 写盘**成功之后**才调用：把游标与 rev 推进到目标位置。
+     * @param {string} filePath
+     * @param {number} rev
+     * @param {number} [cursorAfter]
      */
-    commitRestore(filePath, rev) {
+    commitRestore(filePath, rev, cursorAfter) {
       const history = ensure(filePath)
+      if (Number.isFinite(cursorAfter)) history.cursor = cursorAfter
       if (Number.isFinite(rev)) history.rev = rev
       return history.rev
     },
