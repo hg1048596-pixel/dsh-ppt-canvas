@@ -524,6 +524,25 @@ check('patch: 连续两次清空空行都保留 endParaRPr 格式（第二次不
   assert(hasEndPara, '连续两次清空后仍应保留 a:endParaRPr（否则行高/字号回退）')
 })
 
+check('patch: setTextStyle 打在无文本体元素上必须被拒（不再假成功）', () => {
+  // 以前：txBodyFor 返回 undefined → 什么都不写，却 push status:'applied'
+  // 并让 rev +1 —— 用户看到"成功了"，文件其实没变。
+  const buffer = readFileSync(deckPath)
+  const deck = readDeck(buffer, deckPath, 0)
+  const table = deck.slides[1].shapes.find(shape => shape.kind === 'table')
+  assert(table !== undefined, 'fixture 第二页应有表格')
+  let code = null
+  try {
+    applyPatch(buffer, deck, deckPath, {
+      summary: '给表格设字体',
+      ops: [{ op: 'setTextStyle', id: table.id, fontSize: 20 }],
+    }, {})
+  } catch (error) {
+    code = error.code
+  }
+  assertEqual(code, 'validationFailed', '对表格 setTextStyle 必须是 validationFailed')
+})
+
 // ---------------------------------------------------------------- 补丁
 
 check('patch: 混合补丁应用后回读一致', () => {

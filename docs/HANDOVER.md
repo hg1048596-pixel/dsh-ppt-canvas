@@ -117,7 +117,7 @@ $dev  = "D:\deepseek harness plugin\dsh-ppt-canvas"
 **当前测试基线（全绿）：**
 
 ```
-engine 31 | concurrency 4 | api 30 | client 18 | css 4 | no-window 6 | host-load 10 | render 8 | sync OK
+engine 35 | concurrency 4 | api 33 | client 18 | css 4 | no-window 6 | host-load 10 | render 8 | sync OK
 ```
 
 > 注意 `render` 的端到端 3 条**需要装有 LibreOffice**；没装时该套件会打印 skip 并以 0 退出
@@ -136,6 +136,11 @@ engine 里 3 个用例守着**文字样式保真管线**（逐段样式沿用 + 
 | 写操作串行化 | `deck-store.enqueueMutation` | apply/undo/redo 串行执行，防 lost update（并发双写会丢改动、历史出现重复 rev） |
 | CSRF 两道闸 | `api.js isAllowedOrigin` + `hasJsonContentType` | 非白名单 Origin 一律 403；POST 必须 `application/json`（强制浏览器走预检）。**只省 CORS 头挡不住副作用** |
 | 占位符几何继承 | `pptx-read.readLayoutPlaceholders` | slideLayout → slideMaster 两级。真实 PPT 的占位符`<p:spPr/>` 没有 `a:xfrm` |
+| 占位符**写入**基线 | `pptx-write.baseGeometry` | 无 xfrm 时用 deck 模型（含继承）的几何做 move/resize/align/duplicate 的基准，绝不物化 0×0；取不到就拒绝 |
+| render 令牌 | `api.js renderToken` + `GET /api/status` | render 是 GET 且有重副作用（spawn LibreOffice）；跨站 `<img>` 不带 Origin，只能靠令牌区分。令牌经 CORS 保护的 status 下发 |
+| render 串行化 | `api.js renderQueue` | 同时只起一个 soffice，避免抢同一个 profile |
+| zip 预算 | `zip.js MAX_ENTRY_INFLATED_BYTES` / `MAX_TOTAL…` | 单条 256MB、全包 1GB，并校验 CRC；防 zip 炸弹 |
+| 临时区清理 | `host/temp-sweep.js` | 启动时删除超过 7 天的 picked/render/历史快照（此前无界增长） |
 | 面板错误条 | `app.js` `.dsh-ppt-errorbar` | `state.error` 常驻可见（不是 6s 消失的 toast） |
 
 

@@ -207,6 +207,19 @@ export function validatePatch(deck, patch) {
         if (raw.align !== undefined && !['left', 'center', 'right', 'justify'].includes(raw.align)) {
           violations.push({ index, op, field: 'align', message: 'align must be left|center|right|justify' })
         }
+        // 和 setText 同理：没有文本体的元素（图片/表格/线条/组合）改不了文字样式。
+        // 以前这里会「返回 applied 但文件没变」，还让 rev +1 —— 静默的假成功。
+        if (id !== undefined) {
+          const target = elementById(deck, id)
+          if (target !== undefined && (target.shape.text === null || target.shape.text === undefined)) {
+            violations.push({
+              index,
+              op,
+              field: 'id',
+              message: `element ${id} (${target.shape.kind}) has no text body; setTextStyle only works on text-bearing shapes`,
+            })
+          }
+        }
         if (id !== undefined) {
           ops.push({ index, op, id, color, fontSize, fontFamily, bold: raw.bold, italic: raw.italic, underline: raw.underline, align: raw.align })
         }

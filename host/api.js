@@ -107,7 +107,23 @@ export function registerRoutes(carriers, store, bus, logger) {
   const route = {
     kind: 'prefix',
     path: PREFIX,
-    handler: (req, res) => { handleRequest(req, res, store, bus, logger) },
+    // 必须接住 Promise：宿主路由只调用 handler，不会 await 它。
+    // 少了这个 catch，handleRequest 内部再抛错就会变成未处理 rejection
+    // 并静默丢掉请求（standalone-server 那层有 catch，宿主路由没有）。
+    handler: (req, res) => {
+      Promise.resolve(handleRequest(req, res, store, bus, logger)).catch((error) => {
+        logger?.warn?.('[dsh-ppt-canvas] handler failed:', error)
+        try {
+          if (!res.headersSent) {
+            res.statusCode = 500
+            res.setHeader('content-type', 'application/json; charset=utf-8')
+            res.end(JSON.stringify({ ok: false, error: { code: 'internal', message: 'internal error' } }))
+          } else {
+            res.end()
+          }
+        } catch { /* 连接可能已断开 */ }
+      })
+    },
   }
 
   // 通路 1：connection 的 fetch 路由注册表
@@ -420,6 +436,16 @@ async function serveMedia(req, res, store, rest) {
 // ------------------------------------------------------------------ 工具
 
 function isLoopbackRequest(req) {
+  // Host 头校验挡的是 DNS rebinding（攻击者把域名解析到 127.0.0.1）。
+  // 但如果宿主 webServer 绑到了 0.0.0.0，局域网里可以直接连过来、伪造
+  // `Host: 127.0.0.1` 绕过它 —— 所以还要看**真实来源地址**。
+  const remote = req.socket?.remoteAddress ?? ''
+  const fromLoopback = remote === '' // 某些测试桩没有 socket，放行由 Host 校验兜底
+    || remote === '127.0.0.1'
+    || remote === '::1'
+    || remote === '::ffff:127.0.0.1'
+    || remote.startsWith('127.')
+  if (!fromLoopback) return false
   const host = req.headers.host
   if (typeof host !== 'string') return false
   let hostname
