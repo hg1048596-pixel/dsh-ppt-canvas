@@ -14,7 +14,7 @@
 // 文件名与 presentation.xml 都不动，因此不需要改 Content_Types 或 sldIdLst。
 
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -205,6 +205,8 @@ export async function renderSlidePng({ file, entries, page, width = 1600, slideP
       stagedPath,
     ], 60000)
   } catch (error) {
+    // 失败也要清掉这次的中间产物，否则坏一次就留一份整包 pptx
+    cleanupStaging(stagedPath, outDir)
     const wrapped = new Error(`渲染第 ${page} 页失败：${error.message}`)
     wrapped.code = 'renderFailed'
     throw wrapped
@@ -212,13 +214,83 @@ export async function renderSlidePng({ file, entries, page, width = 1600, slideP
 
   const produced = join(outDir, `${key}.png`)
   if (!existsSync(produced)) {
+    cleanupStaging(stagedPath, outDir)
     const error = new Error(`LibreOffice 没有产出图片（第 ${page} 页）`)
     error.code = 'renderFailed'
     throw error
   }
   const rendered = readFileSync(produced)
   writeFileSync(cachedPath, rendered)
+  // 中间产物到此没用了：暂存的整包 pptx（8.9MB 的文稿每页一份）+ LibreOffice 输出目录。
+  // 以前它们永不删除，缓存目录会随编辑/翻页无限膨胀。
+  cleanupStaging(stagedPath, outDir)
+  pruneCache(dir, logger)
   const ms = Date.now() - started
   logger?.info?.(`ppt-canvas render: page ${page} -> ${rendered.length} bytes in ${ms}ms`)
   return { buffer: rendered, cached: false, ms }
+}
+
+/** 删除本次渲染的中间产物（暂存包 + 输出目录）。 */
+function cleanupStaging(stagedPath, outDir) {
+  try { rmSync(stagedPath, { force: true }) } catch { /* 忽略 */ }
+  try { rmSync(outDir, { recursive: true, force: true }) } catch { /* LibreOffice 可能还占着 */ }
+}
+
+/**
+ * 缓存淘汰：PNG 数量与总字节都设上限，按 mtime 从旧到新删。
+ *
+ * 不设上限的话，编辑器每次改完都会因内容哈希变化产生新缓存键 ——
+ * 一份 12 页的文稿改 30 次就是 360 张图。
+ *
+ * @param {string} dir 缓存根目录
+ * @param {object} [logger]
+ */
+export function pruneCache(dir, logger) {
+  const MAX_FILES = 240
+  const MAX_BYTES = 512 * 1024 * 1024
+  let files
+  try {
+    files = readdirSync(dir, { withFileTypes: true })
+      .filter(entry => entry.isFile() && entry.name.endsWith('.png'))
+      .map(entry => {
+        const path = join(dir, entry.name)
+        try {
+          const stat = statSync(path)
+          return { path, size: stat.size, mtimeMs: stat.mtimeMs }
+        } catch {
+          return null
+        }
+      })
+      .filter(Boolean)
+  } catch {
+    return { removed: 0, freedBytes: 0 }
+  }
+
+  // 顺手清掉遗留的暂存包与输出目录（旧版本留下的）
+  try {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith('.pptx')) rmSync(join(dir, entry.name), { force: true })
+      else if (entry.isDirectory() && entry.name !== 'profile') rmSync(join(dir, entry.name), { recursive: true, force: true })
+    }
+  } catch { /* 忽略 */ }
+
+  files.sort((a, b) => a.mtimeMs - b.mtimeMs)
+  let total = files.reduce((sum, file) => sum + file.size, 0)
+  let removed = 0
+  let freedBytes = 0
+  while (files.length > 0 && (files.length > MAX_FILES || total > MAX_BYTES)) {
+    const oldest = files.shift()
+    try {
+      rmSync(oldest.path, { force: true })
+      total -= oldest.size
+      removed += 1
+      freedBytes += oldest.size
+    } catch {
+      break
+    }
+  }
+  if (removed > 0) {
+    logger?.info?.(`ppt-canvas render cache: pruned ${removed} file(s), ${(freedBytes / 1024 / 1024).toFixed(1)} MB`)
+  }
+  return { removed, freedBytes }
 }

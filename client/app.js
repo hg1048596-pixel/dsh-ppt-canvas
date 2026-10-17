@@ -2879,6 +2879,11 @@ function createPptApp(options) {
        */
       textEditStyle,
       /**
+       * 订阅 AI 事件流的实现（由 client.js 注入）。
+       * 暴露出来才能测「ready 解析前就卸载 → 不得再订阅」这条泄漏回归。
+       */
+      watchAi,
+      /**
        * 面板动作（send / newSession / openPath …）。
        * 测试用：发送后在 rev 推进时是否释放 sending，只能靠真实调用 send() 验证。
        */

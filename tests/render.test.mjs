@@ -9,13 +9,13 @@
 // LibreOffice 是本机可选依赖：没装时端到端部分跳过（但会明确打印跳过原因），
 // 单元部分仍然全部执行。
 
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { loadPackage } from '../host/pptx-read.js'
-import { promoteSlide, findSoffice, renderSlidePng } from '../host/render.js'
+import { promoteSlide, findSoffice, renderSlidePng, pruneCache } from '../host/render.js'
 import { readZip, writeZip } from '../host/zip.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -159,6 +159,36 @@ check('render: promoteSlide 按 slideParts 映射页号（重排过的文件不�
 check('render: findSoffice 返回存在的路径或 null', () => {
   const found = findSoffice()
   if (found !== null) assert(existsSync(found), `返回的路径必须存在：${found}`)
+})
+
+check('render: 缓存淘汰清掉中间产物并限制 PNG 数量（目录不再无限膨胀）', () => {
+  // 实测：反复跑测试后缓存目录里攒了 256 个暂存 pptx + 256 个输出目录 + 256 张 png。
+  // 暂存包在渲染成功后应当立即删除；PNG 按数量/字节设上限。
+  const dir = mkdtempSync(join(tmpdir(), 'ppt-cache-'))
+  try {
+    // 遗留中间产物
+    writeFileSync(join(dir, 'aaaa.pptx'), Buffer.alloc(1024))
+    writeFileSync(join(dir, 'bbbb.pptx'), Buffer.alloc(1024))
+    mkdirSync(join(dir, 'aaaa'), { recursive: true })
+    writeFileSync(join(dir, 'aaaa', 'aaaa.png'), Buffer.alloc(2048))
+    // 少量 png（未超上限）
+    for (let i = 0; i < 5; i += 1) writeFileSync(join(dir, `keep${i}.png`), Buffer.alloc(256))
+
+    pruneCache(dir)
+    const afterFirst = readdirSync(dir)
+    assertEqual(afterFirst.filter(name => name.endsWith('.pptx')).length, 0, '暂存 pptx 必须被清掉')
+    assertEqual(afterFirst.filter(name => name === 'aaaa').length, 0, '遗留输出目录必须被清掉')
+    assertEqual(afterFirst.filter(name => name.endsWith('.png')).length, 5, '未超上限的 png 应保留')
+
+    // 灌到上限以上，应当被裁到 <= 240
+    for (let i = 0; i < 250; i += 1) writeFileSync(join(dir, `bulk${i}.png`), Buffer.alloc(128))
+    pruneCache(dir)
+    const afterSecond = readdirSync(dir).filter(name => name.endsWith('.png'))
+    assert(afterSecond.length <= 240, `PNG 数量应被裁到 <= 240，实际 ${afterSecond.length}`)
+    assert(afterSecond.length > 0, '不应把缓存全删光')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 // ---------------------------------------------------------------- 端到端（需要 LibreOffice）

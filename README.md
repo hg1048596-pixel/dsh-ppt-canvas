@@ -170,7 +170,7 @@ node tools/sync-plugin.mjs
 node tools/test-all.mjs
 ```
 
-七个套件 + 一个同步校验，全绿才算通过（当前 **132 项全绿**）：
+七个套件 + 一个同步校验，全绿才算通过（当前 **134 项全绿**）：
 
 | 套件 | 项数 | 覆盖 |
 |     |     |     |
@@ -181,7 +181,7 @@ node tools/test-all.mjs
 | `tests/css.test.mjs` | 4 | CSS 模板结构：大括号配对、规则头未被注释/连接符截断、关键规则仍存在、注释成对 |
 | `tests/no-window.test.mjs` | 6 | 独立窗口已移除的回归：窗口模块与 bundle 均已删除、归档文件仍可恢复、host 无窗口路由/启动器残留、面板无入口按钮、`ppt_canvas_window` 已注销、`/api/window` 明确 404 |
 | `tests/host-load.test.mjs` | 10 | 安装后加载：`plugin/` 自包含导入、只允许 `./` `node:`、`plugin/index.js` 不得存在（会遮蔽入口）、`apply(ctx)` 装配路由与 4 个工具、缺 `webServer` 时优雅降级、工具可执行、`/api/requests` 诊断、profile 安装位置可解析 |
-| `tests/render.test.mjs` | 8 | LibreOffice 精确渲染：`promoteSlide` 外科式改写（其余部件写盘回读后仍一致）、页号↔部件映射、缓存命中与失效；**未装 LibreOffice 时端到端部分会跳过**（见下） |
+| `tests/render.test.mjs` | 8 | LibreOffice 精确渲染：`promoteSlide` 外科式改写（其余部件写盘回读后仍一致）、页号↔部件映射、缓存命中与失效、缓存淘汰（清中间产物 + PNG 上限）；**未装 LibreOffice 时端到端部分会跳过**（见下） |
 | `tools/sync-plugin.mjs --check` | — | `plugin/` 是否与 `host/`、`client/` 源同步 |
 
 > ⚠️ `render` 的端到端 3 条依赖本机安装 LibreOffice；没有时会打印 skip 并以 0 退出

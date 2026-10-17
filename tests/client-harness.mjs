@@ -405,6 +405,28 @@ const registrations = []
 let app = null
 let exposedStore = null
 
+/**
+ * sessions 桩的可编排部分：`retainPlan` 让测试控制 `reference.ready` 何时解析、
+ * 以及 subscribe/release 被调用了几次（用来验证「ready 前卸载不泄漏订阅」）。
+ */
+let retainPlan = null
+const retainStats = { retain: 0, release: 0, subscribe: 0, emits: 0 }
+
+function makeRetain() {
+  retainStats.retain += 1
+  if (retainPlan !== null) return retainPlan()
+  return {
+    ready: Promise.resolve({
+      session: { prompt: async () => ({ ok: true }) },
+      eventSource: {
+        getSnapshot: () => ({ entries: [] }),
+        subscribe: () => { retainStats.subscribe += 1; return () => {} },
+      },
+    }),
+    release: () => { retainStats.release += 1 },
+  }
+}
+
 function makeCtx() {
   return {
     get(name) {
@@ -426,13 +448,7 @@ function makeCtx() {
           binding: () => undefined,
           // retain 让 promptTo 可用（发送链路的前提）。list 仍为空，
           // 这样「无会话时发送按钮禁用」那条断言不受影响。
-          retain: () => ({
-            ready: Promise.resolve({
-              session: { prompt: async () => ({ ok: true }) },
-              eventSource: { getSnapshot: () => ({ entries: [] }), subscribe: () => () => {} },
-            }),
-            release: () => {},
-          }),
+          retain: () => makeRetain(),
         }
       }
       if (name === 'uiWorkspace') {
@@ -935,6 +951,43 @@ step('client: 就地编辑失焦提交 setText，内容没变则不发请求', a
 
   exposedStore.set(current => ({ ...current, deck: null, editingId: null, editCaret: null, log: [] }))
   fetchHandler = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, value: { rev: 0, canUndo: false, canRedo: false, entries: [] } }) })
+})
+
+step('client: watchAi 在 ready 解析前卸载 → 不得再订阅（回归：跨会话串扰/泄漏）', async () => {
+  // 回归：旧实现 cleanup 先跑（release + 调用当时的 no-op unsubscribe），
+  // 随后 ready 才解析并在**已释放的引用**上 subscribe —— 这个订阅永不取消，
+  // 旧会话的推理/回复会继续写进新会话的面板（串扰），每次切换泄漏一个订阅。
+  let resolveReady
+  const ready = new Promise((resolve) => { resolveReady = resolve })
+  retainPlan = () => ({
+    ready,
+    release: () => { retainStats.release += 1 },
+  })
+  retainStats.subscribe = 0
+  retainStats.retain = 0
+
+  const emitted = []
+  const off = app.__forTests.watchAi('session-x', (state) => emitted.push(state))
+  assert(typeof off === 'function', 'watchAi 应返回退订函数')
+
+  // 立刻卸载（模拟快速切换会话）
+  off()
+  assertEqual(retainStats.release, 1, '卸载时应立即 release')
+
+  // 现在才让 ready 解析 —— 已卸载，绝不能再订阅、也不能再 emit
+  resolveReady({
+    session: { prompt: async () => ({ ok: true }) },
+    eventSource: {
+      getSnapshot: () => ({ entries: [] }),
+      subscribe: () => { retainStats.subscribe += 1; return () => {} },
+    },
+  })
+  await scheduler.flush(1)
+
+  assertEqual(retainStats.subscribe, 0, '卸载后不得再订阅事件源（否则永不取消 → 串扰）')
+  assertEqual(emitted.length, 0, '卸载后不得再向面板推送 AI 内容')
+
+  retainPlan = null
 })
 
 console.log('')
