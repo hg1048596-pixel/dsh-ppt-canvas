@@ -167,8 +167,9 @@ export async function renderSlidePng({ file, entries, page, width = 1600, slideP
   }
 
   const started = Date.now()
-  // 每次渲染用独立的用户配置目录，避免和用户正在用的 LibreOffice 抢锁
-  // （实测两个进程共用 profile 时会互相等待，甚至卡住）。
+  // LibreOffice 用户配置目录：**整个进程共用一份**（放在缓存目录下的 profile/）。
+  // 共用是有意为之：独立 profile 每次首渲染要多花约 1.3 秒（实测 2.6s vs 1.3s）。
+  // 共用带来的并发抢锁问题由 api.js 的 renderQueue（同时只跑一个）解决。
   const profileDir = join(dir, 'profile')
   mkdirSync(profileDir, { recursive: true })
   const profileUri = `file:///${profileDir.replace(/\\/g, '/')}`

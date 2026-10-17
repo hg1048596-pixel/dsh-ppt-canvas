@@ -897,7 +897,9 @@ function readShape(container, context) {
     // 曾经写成 `(classified.placeholder ?? '').includes('title')` —— 对对象调 .includes
     // 直接抛 TypeError，导致**所有带 `<p:ph>` 占位符的正常 PPTX 都打不开**（500 ioFailed）。
     // 仓库里的 fixture 全是纯 TextBox、没有 `<p:ph>`，所以测试没拦住。
-    const placeholderType = String(classified.placeholder?.type ?? '')
+    // 大小写不敏感：占位符类型可能是 `title` / `ctrTitle` / `Title`。
+    // 以前直接 includes('title')，`ctrTitle` 匹配不到 titleStyle。
+    const placeholderType = String(classified.placeholder?.type ?? '').toLowerCase()
     const masterDefaults = classified.kind === 'title' || placeholderType.includes('title')
       ? context.masterText?.title
       : context.masterText?.body
@@ -981,7 +983,10 @@ export function loadPackage(buffer) {
     }
   }
   if (slideParts.length === 0) {
-    for (const key of [...entries.keys()].sort()) {
+    // 兜底：按**数字**排序，不能用字典序 —— `slide10.xml` 会排在 `slide2.xml` 之前，
+    // 10 页以上的文稿页序会错乱。
+    const slideNumber = (name) => Number((/slide(\d+)\.xml$/.exec(name) ?? [])[1] ?? 0)
+    for (const key of [...entries.keys()].sort((a, b) => slideNumber(a) - slideNumber(b))) {
       if (/^ppt\/slides\/slide\d+\.xml$/.test(key)) slideParts.push(key)
     }
   }
@@ -1057,11 +1062,23 @@ export function readDeck(buffer, filePath, rev = 0) {
       return
     }
     const slideId = slideTokenOf(slidePart)
-    const rels = parseRels(entries, slidePart)
+    // rels 解析要和 slide XML 一样容错：某个 .rels 坏了只该让这一页退化（没有媒体/版式），
+    // 而不是让整份文稿打开失败。以前它写在 try 之外，一个坏 rels 就 500。
+    let rels = new Map()
+    try {
+      rels = parseRels(entries, slidePart)
+    } catch (error) {
+      warnings.push(`slide ${slidePart} rels cannot be parsed: ${error.message}`)
+    }
     // 占位符的几何继承：真实 PowerPoint 的标题/正文 `<p:spPr>` **没有 a:xfrm**，
     // 位置与尺寸来自 slideLayout 里同一 idx/type 的占位符。不继承的话
     // deck 里每个占位符都是 0×0@0,0 —— 画布选择框、框选命中、AI 上下文坐标全错。
-    const layoutPlaceholders = readLayoutPlaceholders(entries, slidePart, rels, warnings, layoutCache)
+    let layoutPlaceholders = new Map()
+    try {
+      layoutPlaceholders = readLayoutPlaceholders(entries, slidePart, rels, warnings, layoutCache)
+    } catch (error) {
+      warnings.push(`slide ${slidePart} placeholder inheritance failed: ${error.message}`)
+    }
     const cSld = childOf(root, 'p:cSld')
     const spTree = cSld === undefined ? undefined : childOf(cSld, 'p:spTree')
     let background = '#FFFFFF'
