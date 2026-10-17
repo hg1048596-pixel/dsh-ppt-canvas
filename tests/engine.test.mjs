@@ -623,6 +623,24 @@ check('read: 多母版/多主题会明确告警（已知限制不再静默）', 
   )
 })
 
+check('read: 逐页主题索引建立（多母版时每页取自己的主题色）', () => {
+  // 旧实现只读 theme1.xml，其他母版的页面会取错主题色（静默错色）。
+  // 现在按 layout → master → theme 建索引，readDeck 逐页选择。
+  const pkg = loadPackage(readFileSync(FIXTURE))
+  assert(pkg.layoutToTheme instanceof Map, 'loadPackage 应暴露 layoutToTheme')
+  assert(pkg.layoutToTheme.size > 0, '至少要把用到的 layout 映射到主题')
+
+  // 每个映射到的主题都应有实际色值（不是空表）
+  for (const [layoutPart, scheme] of pkg.layoutToTheme) {
+    assert(Object.keys(scheme).length > 0, `${layoutPart} 的主题色表不应为空`)
+    assert(typeof scheme.accent1 === 'string' && scheme.accent1.startsWith('#'), '主题应含 accent1')
+  }
+
+  // 逐页读取不因逐页主题而崩
+  const deck = readDeck(readFileSync(FIXTURE), FIXTURE, 0)
+  assertEqual(deck.slides.length, 3)
+})
+
 // ---------------------------------------------------------------- 补丁
 
 check('patch: 混合补丁应用后回读一致', () => {

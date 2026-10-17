@@ -170,11 +170,11 @@ node tools/sync-plugin.mjs
 node tools/test-all.mjs
 ```
 
-七个套件 + 一个同步校验，全绿才算通过（当前 **134 项全绿**）：
+七个套件 + 一个同步校验，全绿才算通过（当前 **135 项全绿**）：
 
 | 套件 | 项数 | 覆盖 |
 |     |     |     |
-| `tests/engine.test.mjs` | 35 | XML 往返、zip 字节级往返、fixture 解析、补丁应用与回读、校验失败不落盘、`dryRun`、撤销/重做字节还原、CJK 空格保真、未触碰页字节不变、母版文本继承、占位符二级几何继承、文字样式保真（逐段/空行/diff）、fill/line/文本类 op 的能力校验 |
+| `tests/engine.test.mjs` | 35 | XML 往返、zip 字节级往返、fixture 解析、补丁应用与回读、校验失败不落盘、`dryRun`、撤销/重做字节还原、CJK 空格保真、未触碰页字节不变、母版文本继承、占位符二级几何继承、逐页主题索引（多母版取色）、文字样式保真（逐段/空行/diff）、fill/line/文本类 op 的能力校验 |
 | `tests/api.test.mjs` | 33 | 真实 `node:http` 服务器 + 全链路：open → deck → context → apply(dryRun) → apply → history → staleRev → undo/redo → media → selftest；外部改动检测与 `staleFile`、并发写、`/api/files`、render 令牌与越界、非 loopback 拒绝、CSRF（来源白名单 + JSON content-type）、坏 JSON |
 | `tests/concurrency.test.mjs` | 8 | 并发 apply 不丢改动、失败不阻断队列、undo 走同一队列、写盘失败不推进游标、包解析缓存失效、context 大小上限、deck LRU |
 | `tests/client-harness.mjs` | 18 | 客户端 bundle 冒烟：经典脚本形态、CSS/应用层内联、factory 导出形状、插槽注册、浮窗最小化/展开、标题栏拖动、无选中时发送禁用、会话菜单能渲染、AI 面板多状态、外部改动轮询触发的自动重载、发送后 sending 及时释放、文件对话框取消能收尾、就地编辑器 ×zoom 定位、失焦提交与无变化守卫、独立窗口入口确已移除 |

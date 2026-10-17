@@ -153,8 +153,13 @@ function imageSize(bytes) {
 
 /** 读主题色表（a:clrScheme 的 srgbClr / sysClr 值）。 */
 function readTheme(entries) {
-  const scheme = { }
-  const bytes = entries.get('ppt/theme/theme1.xml')
+  return readThemePart(entries, 'ppt/theme/theme1.xml')
+}
+
+/** 读指定主题部件的色表；部件不存在或坏掉时返回空表。 */
+function readThemePart(entries, partName) {
+  const scheme = {}
+  const bytes = partName === undefined ? undefined : entries.get(partName)
   if (bytes === undefined) return scheme
   let root
   try { root = parseXml(Buffer.from(bytes).toString('utf8')) } catch { return scheme }
@@ -167,6 +172,56 @@ function readTheme(entries) {
     if (value !== undefined) scheme[entry.name.replace('a:', '')] = `#${String(value).toUpperCase()}`
   }
   return scheme
+}
+
+/**
+ * 建立 layout → master → theme 的映射，供**逐页**取正确的主题。
+ *
+ * 真实文稿可以有多套母版/主题（每个 master 有自己的 theme，每个 layout 属于某个 master，
+ * 每页属于某个 layout）。只读 theme1.xml 会让其他母版的页面取错主题色。
+ *
+ * @returns {{ layoutToTheme: Map<string, object>, warn: string|null }}
+ */
+function buildThemeIndex(entries) {
+  const layoutToTheme = new Map()
+  const themeCache = new Map()
+  const themeOf = (partName) => {
+    if (partName === undefined) return undefined
+    if (themeCache.has(partName)) return themeCache.get(partName)
+    const scheme = readThemePart(entries, partName)
+    themeCache.set(partName, scheme)
+    return scheme
+  }
+
+  const masters = [...entries.keys()].filter(name => /^ppt\/slideMasters\/slideMaster\d+\.xml$/.test(name))
+  const masterTheme = new Map()
+  for (const masterPart of masters) {
+    let rels
+    try { rels = parseRels(entries, masterPart) } catch { continue }
+    const themePart = findRelatedPart(masterPart, rels, '/theme')
+    if (themePart !== null) masterTheme.set(masterPart, themePart)
+  }
+  const fallbackTheme = masters.length > 0 ? masterTheme.get(masters[0]) : 'ppt/theme/theme1.xml'
+
+  const layouts = [...entries.keys()].filter(name => /^ppt\/slideLayouts\/slideLayout\d+\.xml$/.test(name))
+  for (const layoutPart of layouts) {
+    let rels
+    try { rels = parseRels(entries, layoutPart) } catch { continue }
+    const masterPart = findRelatedPart(layoutPart, rels, '/slideMaster')
+    const themePart = masterPart === null ? fallbackTheme : (masterTheme.get(masterPart) ?? fallbackTheme)
+    const scheme = themeOf(themePart === null ? undefined : themePart)
+    if (scheme !== undefined && Object.keys(scheme).length > 0) layoutToTheme.set(layoutPart, scheme)
+  }
+
+  return {
+    layoutToTheme,
+    masters: masters.length,
+    // 主题色已经按每页的 layout→master 取对了；但**母版文本默认值**
+    // （readMasterTextDefaults）仍只读第一份 slideMaster —— 多母版时那一项可能不准。
+    warn: masters.length > 1
+      ? `presentation has ${masters.length} slide masters; theme colours are resolved per slide, but master text defaults come from the first master`
+      : null,
+  }
 }
 
 const SCHEME_ALIAS = {
@@ -1021,20 +1076,15 @@ export function loadPackage(buffer) {
   }
 
   const theme = readTheme(entries)
-  // 多母版/多主题：目前只解析 theme1.xml 与第一个 slideMaster。
-  // 这类文稿的主题色与母版文本默认值可能取错（每个 master 可以有自己的 theme），
-  // 属于**已知限制**。这里明确告警，避免"颜色不对但没人知道为什么"。
+  // 多母版：按 layout → master → theme 建索引，让每页用**自己的**主题色。
+  // 只读 theme1.xml 会让其他母版的页面取错主题色（silent wrong colours）。
+  let layoutToTheme = new Map()
   try {
-    const themes = [...entries.keys()].filter(name => /^ppt\/theme\/theme\d+\.xml$/.test(name))
-    const masters = [...entries.keys()].filter(name => /^ppt\/slideMasters\/slideMaster\d+\.xml$/.test(name))
-    if (themes.length > 1 || masters.length > 1) {
-      warnings.push(
-        `presentation has ${masters.length} slide master(s) / ${themes.length} theme(s); `
-        + 'only the first theme and master are used — theme colors or master text defaults may be off on some slides',
-      )
-    }
-  } catch { /* 统计失败不影响读取 */ }
-  return { entries, rawOf, slideParts, theme, media, warnings, slideWidthEmu, slideHeightEmu }
+    const index = buildThemeIndex(entries)
+    layoutToTheme = index.layoutToTheme
+    if (index.warn !== null) warnings.push(index.warn)
+  } catch { /* 索引失败就退回全局主题 */ }
+  return { entries, rawOf, slideParts, theme, layoutToTheme, media, warnings, slideWidthEmu, slideHeightEmu }
 }
 
 /**
@@ -1046,7 +1096,7 @@ export function loadPackage(buffer) {
  */
 export function readDeck(buffer, filePath, rev = 0) {
   const pkg = loadPackage(buffer)
-  const { entries, slideParts, theme, media, warnings } = pkg
+  const { entries, slideParts, theme, layoutToTheme, media, warnings } = pkg
   const deckKey = deckKeyOf(filePath)
 
   // 母版的文本排版默认值。**必须在这里解析**：实测用户的文件把 lnSpc / spcBef 只写在
@@ -1121,7 +1171,17 @@ export function readDeck(buffer, filePath, rev = 0) {
     if (spTree !== undefined) {
       let z = 0
       for (const child of childrenOf(spTree)) {
-        const shape = readShape(child, { slideId, slidePart, rels, theme, mediaIndex, warnings, masterText, layoutPlaceholders })
+        // 这一页应当用哪个主题：slide → layout → master → theme。
+    // 单母版文稿 layoutToTheme 为空/同一份，等价于全局 theme，无额外开销。
+    let slideTheme = theme
+    try {
+      const layoutPart = findRelatedPart(slidePart, rels, '/slideLayout')
+      const perLayout = layoutPart === null ? undefined : layoutToTheme.get(layoutPart)
+      if (perLayout !== undefined && Object.keys(perLayout).length > 0) slideTheme = perLayout
+    } catch { /* 取不到就用全局主题 */ }
+    const shape = readShape(child, {
+      slideId, slidePart, rels, theme: slideTheme, mediaIndex, warnings, masterText, layoutPlaceholders,
+    })
         if (shape === null) continue
         shape.z = z
         // 媒体 URL 里的 deckKey 占位符要**递归**替换：组合里的图片是子形状，
