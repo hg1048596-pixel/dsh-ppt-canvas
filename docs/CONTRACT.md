@@ -201,7 +201,7 @@
 | GET  | `/dsh-ppt/api/requests` | — | 诊断：最近请求 + `health`（工具注册状态） |
 | POST | `/dsh-ppt/api/context` | §3 | `{ "requestId": "...", "context": <原文> }` |
 | GET  | `/dsh-ppt/api/context?requestId=...` | — | `{ "context": <原文>, "consumed": bool }` |
-| POST | `/dsh-ppt/api/apply` | `{ "patch": §5, "dryRun": true, "source": "ai"\|"user", "requestId": "..." }` | `ApplyResult` |
+| POST | `/dsh-ppt/api/apply` | `{ "patch": §5, "dryRun": true, "requestId": "..." }`（`source` 目前**被忽略**，仅为兼容保留） | `ApplyResult` |
 | POST | `/dsh-ppt/api/undo` | `{ "steps": 1 }` | `Deck` |
 | POST | `/dsh-ppt/api/redo` | `{ "steps": 1 }` | `Deck` |
 | GET  | `/dsh-ppt/api/history` | — | `{ "rev": 7, "canUndo": true, "canRedo": false, "entries": [...] }` |

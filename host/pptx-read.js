@@ -10,9 +10,9 @@
 
 import { createHash } from 'node:crypto'
 import { resolve } from 'node:path'
-import { readZip, readZipEntries } from './zip.js'
+import { readZip } from './zip.js'
 import {
-  parseXml, findAll, findFirst, childrenOf, childOf, textOf, getAttr, isElement, isText, Element,
+  parseXml, findAll, findFirst, childrenOf, childOf, textOf, getAttr, isElement,
 } from './xml.js'
 
 const EMU_PER_PX = 9525

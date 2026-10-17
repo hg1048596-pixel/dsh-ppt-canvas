@@ -16,7 +16,7 @@ import { readZip, readZipEntries, writeZip } from './zip.js'
 import {
   parseXml, serializeXml, childrenOf, childOf, findAll, findFirst, textOf, getAttr, setAttr,
   createElement, appendChild, insertBefore, removeChild, removeChildren, cloneElement,
-  setText, isElement, isText,
+  setText, isElement,
 } from './xml.js'
 import { emuToPx, pxToEmu, elementById } from './pptx-read.js'
 
