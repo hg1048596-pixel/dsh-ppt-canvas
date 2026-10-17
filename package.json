@@ -1,9 +1,17 @@
 {
   "name": "dsh-ppt-canvas",
   "version": "1.0.0",
-  "description": "DeepSeek Harness plugin: click/marquee-select components on a PPT canvas, send the selection + a natural-language instruction to the AI, and apply the returned edit plan to the .pptx live — with undo/redo and error handling.",
+  "description": "PowerPoint canvas for the DeepSeek Harness window: select shapes or a whole slide, describe the change in natural language, and the AI applies it to the .pptx as byte-preserving OOXML patches, with undo and redo.",
   "type": "module",
   "main": "./plugin/host.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hg1048596-pixel/dsh-ppt-canvas.git"
+  },
+  "homepage": "https://github.com/hg1048596-pixel/dsh-ppt-canvas#readme",
+  "bugs": {
+    "url": "https://github.com/hg1048596-pixel/dsh-ppt-canvas/issues"
+  },
   "exports": {
     ".": "./plugin/host.js",
     "./client": "./plugin/client.js",
@@ -17,12 +25,14 @@
   ],
   "license": "MIT",
   "keywords": [
+    "dsh-plugin",
     "deepseek-harness",
     "dsh",
     "plugin",
     "cordis",
     "pptx",
     "powerpoint",
+    "ooxml",
     "canvas",
     "ai-editing"
   ],
