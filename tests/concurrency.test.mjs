@@ -108,6 +108,63 @@ await check('undo 也走队列（与 apply 不互相踩）', async () => {
   assert(after >= before - 1, `rev 不应异常回退（before=${before} after=${after}）`)
 })
 
+await check('packageOf 缓存解析结果，写盘后失效（避免每请求全包解压）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ppt-pkg-'))
+  const file = join(dir, 'p.pptx')
+  copyFileSync(FIXTURE, file)
+  const localStore = new DeckStore()
+  await localStore.open(file)
+
+  const first = localStore.packageOf()
+  const second = localStore.packageOf()
+  assert(first === second, '同一 buffer 必须复用同一个解析结果（===）')
+
+  const shape = localStore.view().slides[0].shapes.find(item => item.kind !== 'group')
+  await localStore.apply({ summary: '改一笔', ops: [{ op: 'setFill', id: shape.id, color: '#778899' }] })
+  const third = localStore.packageOf()
+  assert(third !== first, '写盘后 buffer 变了，缓存必须失效')
+
+  rmSync(dir, { recursive: true, force: true })
+})
+
+await check('上下文体超过 512KB 被拒（防止内存被撑爆）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ppt-ctx-'))
+  const file = join(dir, 'c.pptx')
+  copyFileSync(FIXTURE, file)
+  const localStore = new DeckStore()
+  await localStore.open(file)
+
+  // 小上下文正常
+  const ok = localStore.putContext({ instruction: 'hi', elements: [] })
+  assert(typeof ok.requestId === 'string' && ok.requestId !== '')
+
+  // 超大上下文被拒
+  let code = null
+  try {
+    localStore.putContext({ instruction: 'x', blob: 'A'.repeat(600 * 1024) })
+  } catch (error) {
+    code = error.code
+  }
+  assertEqual(code, 'badRequest', '超大 context 必须被拒')
+
+  rmSync(dir, { recursive: true, force: true })
+})
+
+await check('打开过多文档时按 LRU 淘汰（decks 不再无限增长）', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ppt-lru-'))
+  const localStore = new DeckStore()
+  for (let index = 0; index < 6; index += 1) {
+    const file = join(dir, `deck-${index}.pptx`)
+    copyFileSync(FIXTURE, file)
+    await localStore.open(file)
+  }
+  assert(localStore.decks.size <= localStore.maxOpenDecks, `decks 应被限制在 ${localStore.maxOpenDecks}，实际 ${localStore.decks.size}`)
+  // 当前文档不能被淘汰
+  assert(localStore.current !== null, 'current 必须保留')
+  assert(localStore.decks.has(localStore.current.filePath), 'current 必须在 decks 里')
+  rmSync(dir, { recursive: true, force: true })
+})
+
 await check('写盘失败不推进撤销游标（内存与磁盘必须一致）', async () => {
   // 原缺陷：history.undo() 内部直接推进 cursor/rev，而写盘在它之后才发生。
   // 写盘失败（文件被占用/目录消失/磁盘满）时文件没变、游标却已回退，

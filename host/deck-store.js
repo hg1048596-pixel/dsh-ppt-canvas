@@ -71,6 +71,46 @@ export class DeckStore {
   }
 
   /**
+   * 已打开文档的 LRU 上限。
+   *
+   * 每份 OpenDeck 都握着完整 buffer + 解析后的 deck（最大 80MB），
+   * 而 `this.decks` 以前只增不减 —— 连续打开多个大文件就能把宿主内存吃满。
+   * 保留 current + 少量最近项足够（切换回同一文件可命中缓存）。
+   */
+  get maxOpenDecks() {
+    return 4
+  }
+
+  /** 淘汰超出上限的非当前文档（Map 的插入顺序即「最近使用」顺序）。 */
+  pruneDecks() {
+    if (this.decks.size <= this.maxOpenDecks) return
+    for (const [filePath, open] of this.decks) {
+      if (this.decks.size <= this.maxOpenDecks) break
+      if (open === this.current) continue
+      this.decks.delete(filePath)
+    }
+  }
+
+  /**
+   * 取（并缓存）当前文档解析后的包。
+   *
+   * 之前 media / render 每个请求都 `loadPackage(open.buffer)` —— 8.9MB 的文稿
+   * 实测每次约 10ms、解压 9.3MB；一页放 5 张图就是 5 次全包解压。
+   * 这里按 **buffer 身份**缓存：写入会替换 open.buffer，缓存自然失效。
+   *
+   * @param {object} open
+   * @returns {ReturnType<typeof loadPackage>}
+   */
+  packageOf(open) {
+    const target = open ?? this.requireCurrent()
+    if (target.pkg !== undefined && target.pkgBuffer === target.buffer) return target.pkg
+    const pkg = loadPackage(new Uint8Array(target.buffer))
+    target.pkg = pkg
+    target.pkgBuffer = target.buffer
+    return pkg
+  }
+
+  /**
    * 把一次写操作排进队列，保证同一时刻只有一个在跑。
    * 前一个失败不会断链（用 `then(ok, err)` 接住两种结果）。
    *
@@ -184,6 +224,7 @@ export class DeckStore {
     open.deck.rev = open.rev
     this.decks.set(filePath, open)
     this.current = open
+    this.pruneDecks()
     return this.view(open)
   }
 
@@ -477,6 +518,18 @@ export class DeckStore {
       ? payload.requestId
       : `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
     const open = this.current
+    // 单份上下文也要限大小：它包含选中元素的完整属性（可含表格单元格、文本段），
+    // 64 条 × 128MB 的 body 上限足以吃光内存。这里只做成本极低的 JSON 体积检查。
+    let sizeBytes = 0
+    try {
+      sizeBytes = Buffer.byteLength(JSON.stringify(payload), 'utf8')
+    } catch {
+      throw new DeckError('badRequest', 'context must be JSON-serializable')
+    }
+    const MAX_CONTEXT_BYTES = 512 * 1024
+    if (sizeBytes > MAX_CONTEXT_BYTES) {
+      throw new DeckError('badRequest', `context is too large (${sizeBytes} bytes; limit ${MAX_CONTEXT_BYTES})`)
+    }
     const entry = {
       payload: {
         ...payload,

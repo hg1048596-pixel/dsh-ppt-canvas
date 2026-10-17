@@ -292,7 +292,7 @@ async function handleGet(name, url, res, store, bus, logger) {
       const open = store.requireCurrent()
       const { loadPackage } = await import('./pptx-read.js')
       const { renderSlidePng } = await import('./render.js')
-      const pkg = loadPackage(new Uint8Array(open.buffer))
+      const pkg = store.packageOf(open)
       if (!Number.isInteger(page) || page > pkg.slideParts.length) {
         send(res, 404, {
           ok: false,
@@ -413,8 +413,9 @@ async function serveMedia(req, res, store, rest) {
     send(res, 404, { ok: false, error: { code: 'notFound', message: `unknown media ${mediaId}` } })
     return
   }
-  const { loadPackage } = await import('./pptx-read.js')
-  const pkg = loadPackage(open.buffer)
+  // 用 store 的包缓存：媒体请求一页可能有十几张图，每次重新解压整个包
+  // （实测 8.9MB 文稿约 10ms/次、解压 9.3MB）既慢又费内存。
+  const pkg = store.packageOf(open)
   const entry = pkg.media.get(mediaId)
   if (entry === undefined) {
     send(res, 404, { ok: false, error: { code: 'notFound', message: `media ${mediaId} has no payload` } })
