@@ -596,6 +596,33 @@ check('patch: 未触碰部件的**压缩字节**原样复制（不再全包重�
   assertEqual(differ.length, 0, `未触碰部件的压缩字节必须完全一致，但以下被重压缩了：${differ.slice(0, 3).join(', ')}`)
 })
 
+check('read: 多母版/多主题会明确告警（已知限制不再静默）', () => {
+  // 目前只解析 theme1.xml 与第一个 slideMaster。多母版文稿的主题色/母版文本默认值
+  // 可能取错 —— 属于已知限制。这里保证它**说出来**，而不是悄悄给出错颜色。
+  const entries = readZipEntries(readFileSync(FIXTURE))
+  const theme = entries.find(entry => entry.name === 'ppt/theme/theme1.xml')
+  const master = entries.find(entry => /^ppt\/slideMasters\/slideMaster\d+\.xml$/.test(entry.name))
+  assert(theme !== undefined && master !== undefined, 'fixture 应有 theme 与 slideMaster')
+
+  const withTwoMasters = writeZip([
+    ...entries.map(entry => ({ name: entry.name, data: entry.data })),
+    { name: 'ppt/theme/theme2.xml', data: theme.data },
+    { name: 'ppt/slideMasters/slideMaster2.xml', data: master.data },
+  ])
+  const deck = readDeck(withTwoMasters, deckPath, 0)
+  assert(
+    deck.warnings.some(warning => warning.includes('slide master')),
+    `应告警多母版限制，实际 warnings：${JSON.stringify(deck.warnings)}`,
+  )
+
+  // 单母版的前提下不该有这条噪音
+  const single = readDeck(readFileSync(FIXTURE), FIXTURE, 0)
+  assert(
+    !single.warnings.some(warning => warning.includes('slide master')),
+    '单母版文稿不应产生该告警',
+  )
+})
+
 // ---------------------------------------------------------------- 补丁
 
 check('patch: 混合补丁应用后回读一致', () => {

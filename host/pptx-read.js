@@ -1006,6 +1006,19 @@ export function loadPackage(buffer) {
   }
 
   const theme = readTheme(entries)
+  // 多母版/多主题：目前只解析 theme1.xml 与第一个 slideMaster。
+  // 这类文稿的主题色与母版文本默认值可能取错（每个 master 可以有自己的 theme），
+  // 属于**已知限制**。这里明确告警，避免"颜色不对但没人知道为什么"。
+  try {
+    const themes = [...entries.keys()].filter(name => /^ppt\/theme\/theme\d+\.xml$/.test(name))
+    const masters = [...entries.keys()].filter(name => /^ppt\/slideMasters\/slideMaster\d+\.xml$/.test(name))
+    if (themes.length > 1 || masters.length > 1) {
+      warnings.push(
+        `presentation has ${masters.length} slide master(s) / ${themes.length} theme(s); `
+        + 'only the first theme and master are used — theme colors or master text defaults may be off on some slides',
+      )
+    }
+  } catch { /* 统计失败不影响读取 */ }
   return { entries, slideParts, theme, media, warnings, slideWidthEmu, slideHeightEmu }
 }
 
