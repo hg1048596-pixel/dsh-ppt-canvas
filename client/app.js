@@ -2873,6 +2873,11 @@ function createPptApp(options) {
       renderShape,
       /** 媒体 URL 的候选列表（核对图片地址拼得对不对）。 */
       mediaUrlCandidates,
+      /**
+       * 面板动作（send / newSession / openPath …）。
+       * 测试用：发送后在 rev 推进时是否释放 sending，只能靠真实调用 send() 验证。
+       */
+      get actions() { return actionsRef.current },
       /** 展开元素直到宿主标签（例如 'button' / 'div'）。 */
       renderToTag(element, depth = 0) {
         if (element === null || element === undefined || depth > 16) return null

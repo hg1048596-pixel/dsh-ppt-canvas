@@ -138,10 +138,16 @@ function createFakeReact() {
       if (!changed) return undefined
       hooks.states[key] = deps
       hooks.effects++
-      const cleanup = fn()
-      if (typeof cleanup === 'function') {
-        try { cleanup() } catch (error) { throw new Error(`effect cleanup threw: ${error.message}`) }
+      // **不立即 cleanup**：真实 React 的 effect 会一直活着，直到依赖变化或卸载。
+      // 以前这里跑完 fn() 马上调用 cleanup，等于所有订阅/定时器存活 0 帧 ——
+      // 轮询、等待 AI 这类逻辑因此完全测不到。
+      // 这里把 cleanup 存起来，由依赖变化或显式 unmount() 触发。
+      const previousCleanup = hooks.states[`cleanup:${index}`]
+      if (typeof previousCleanup === 'function') {
+        try { previousCleanup() } catch (error) { throw new Error(`effect cleanup threw: ${error.message}`) }
       }
+      const cleanup = fn()
+      hooks.states[`cleanup:${index}`] = typeof cleanup === 'function' ? cleanup : undefined
       return undefined
     },
     useMemo(fn) { cursor++; return fn() },
@@ -153,7 +159,17 @@ function createFakeReact() {
       return hooks.states[key]
     },
   }
-  return { React, hooks, reset }
+  return { React, hooks, reset, unmount: () => runCleanups(hooks) }
+}
+
+/** 执行所有挂着的 effect 清理（模拟卸载）。 */
+function runCleanups(hooks) {
+  for (const [key, value] of Object.entries(hooks.states)) {
+    if (!key.startsWith('cleanup:')) continue
+    if (typeof value !== 'function') continue
+    try { value() } catch { /* 卸载期异常忽略 */ }
+    hooks.states[key] = undefined
+  }
 }
 
 /**
@@ -240,6 +256,52 @@ function collectElements(element, predicate, out = [], depth = 0) {
 
 // ------------------------------------------------------------------ 装配
 
+/**
+ * 可手动推进的调度器。
+ *
+ * 为什么必须可控：客户端的关键逻辑（4 秒轮询外部改动、发送后等待 AI 落盘）
+ * 全靠 timeout/interval。以前 ctx.timeout/interval 是空实现，定时器永不触发，
+ * 这些路径**根本测不到** —— 于是"发送后锁死 150 秒"这种 bug 能一路活下来。
+ */
+function createScheduler() {
+  let seq = 0
+  const timers = new Map()
+  const api = {
+    timeout(fn, _ms) {
+      const id = ++seq
+      timers.set(id, { fn })
+      return () => timers.delete(id)
+    },
+    interval(fn, _ms) {
+      const id = ++seq
+      timers.set(id, { fn, repeat: true })
+      return () => timers.delete(id)
+    },
+    /** 当前挂着的定时器数量（含 interval）。 */
+    pending() { return timers.size },
+    clear() { timers.clear() },
+    /**
+     * 触发一轮定时器回调，并让出微任务让 await 链继续。
+     * @param {number} rounds 连续推进几轮（interval 会每轮再触发）
+     */
+    async flush(rounds = 1) {
+      for (let round = 0; round < rounds; round += 1) {
+        const snapshot = [...timers.entries()]
+        for (const [id, timer] of snapshot) {
+          if (!timers.has(id)) continue
+          if (!timer.repeat) timers.delete(id)
+          try { timer.fn() } catch { /* 回调异常由被测代码自己处理 */ }
+        }
+        // 放行 await / Promise 链（多轮，覆盖 await 里再 await）
+        for (let i = 0; i < 6; i += 1) await Promise.resolve()
+      }
+    },
+  }
+  return api
+}
+
+const scheduler = createScheduler()
+
 const dom = createFakeDom()
 const fakeReact = createFakeReact()
 
@@ -258,11 +320,20 @@ globalThis.localStorage = {
   setItem(key, value) { this.store.set(key, String(value)) },
   removeItem(key) { this.store.delete(key) },
 }
-globalThis.fetch = async () => ({
+
+/** 可编排的 fetch：默认回一份 history 载荷，测试里可以替换。 */
+let fetchHandler = async () => ({
   ok: true,
   status: 200,
   json: async () => ({ ok: true, value: { rev: 0, canUndo: false, canRedo: false, entries: [] } }),
 })
+const fetchLog = []
+globalThis.fetch = async (url, init) => {
+  fetchLog.push({ url: String(url), method: init?.method ?? 'GET' })
+  return fetchHandler(String(url), init)
+}
+
+// 全局定时器保持 no-op（业务代码用的是注入的 ctx.timeout/interval）
 globalThis.setTimeout = () => 0
 globalThis.clearTimeout = () => {}
 globalThis.setInterval = () => 0
@@ -327,6 +398,15 @@ function makeCtx() {
             subscribe: () => () => {},
           },
           binding: () => undefined,
+          // retain 让 promptTo 可用（发送链路的前提）。list 仍为空，
+          // 这样「无会话时发送按钮禁用」那条断言不受影响。
+          retain: () => ({
+            ready: Promise.resolve({
+              session: { prompt: async () => ({ ok: true }) },
+              eventSource: { getSnapshot: () => ({ entries: [] }), subscribe: () => () => {} },
+            }),
+            release: () => {},
+          }),
         }
       }
       if (name === 'uiWorkspace') {
@@ -334,8 +414,8 @@ function makeCtx() {
       }
       return undefined
     },
-    timeout: () => () => {},
-    interval: () => () => {},
+    timeout: (fn, ms) => scheduler.timeout(fn, ms),
+    interval: (fn, ms) => scheduler.interval(fn, ms),
     effect: (fn) => { const cleanup = fn(); return () => { if (typeof cleanup === 'function') cleanup() } },
     on: () => () => {},
   }
@@ -593,6 +673,131 @@ step('client: 会话菜单能渲染（打开菜单不抛错）', () => {
   assert(joined.includes('连接到最近会话'), 'the connect entry renders')
   exposedStore.set(current => ({ ...current, sessionMenuOpen: false, sessionId: '' }))
   void opened
+})
+
+/** 一份最小但结构完整的 deck，供轮询/发送等需要文档的逻辑使用。 */
+function makeDeck(rev = 0) {
+  return {
+    file: 'C:/tmp/deck.pptx',
+    rev,
+    fileMtimeMs: 1000,
+    slideWidth: 960,
+    slideHeight: 540,
+    media: {},
+    warnings: [],
+    slides: [{
+      id: 's1',
+      name: '幻灯片 1',
+      background: '#FFFFFF',
+      shapes: [{
+        id: 's1:1',
+        shapeId: '1',
+        name: 'TextBox 1',
+        kind: 'text',
+        z: 0,
+        geometry: { x: 10, y: 10, w: 400, h: 100, rotation: 0, flipH: false, flipV: false },
+        style: { fill: { type: 'none', color: null }, gradient: null, line: null, shadow: false, opacity: 1, cornerRadius: 0, prst: 'rect' },
+        text: {
+          plain: '标题',
+          align: 'left',
+          anchor: 'top',
+          color: '#111111',
+          fontSize: 20,
+          bold: false,
+          italic: false,
+          fontFamily: null,
+          insets: { left: 9.6, top: 4.8, right: 9.6, bottom: 4.8 },
+          autofit: null,
+          paragraphs: [{ level: 0, align: 'left', lnSpc: 1.2, lnSpcIsPx: false, spaceBefore: null, spaceAfter: null, spaceBeforePct: null, spaceAfterPct: null, indent: null, runs: [{ text: '标题', color: '#111111', fontSize: 20, bold: false, italic: false, underline: false, fontFamily: null }] }],
+        },
+        image: null,
+        table: null,
+        children: null,
+        placeholder: null,
+      }],
+    }],
+  }
+}
+
+step('client: 轮询发现磁盘被外部改过 → 自动 force 重载', async () => {
+  // 回归：以前轮询只比较宿主内存里的 rev，PowerPoint 在外部保存不会改它，
+  // 于是外部改动完全感知不到，下一次 apply 会覆盖别人的修改。
+  // 现在轮询 /api/status，changed=true 就重载。
+  openPanelViaLauncher()
+  exposedStore.set(current => ({ ...current, deck: makeDeck(0), slideIndex: 0, log: [] }))
+
+  const requests = []
+  fetchHandler = async (url) => {
+    requests.push(url)
+    if (url.includes('/status')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, value: { file: 'C:/tmp/deck.pptx', rev: 0, mtimeMs: 2000, openedMtimeMs: 1000, changed: true } }),
+      }
+    }
+    if (url.includes('/deck')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, value: makeDeck(0) }) }
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true, value: {} }) }
+  }
+
+  // 渲染一次让轮询 effect 注册 interval，然后手动推进时间
+  app.__forTests.renderToTag(renderFloating())
+  await scheduler.flush(2)
+
+  const statusCalls = requests.filter(url => url.includes('/status')).length
+  const deckReloads = requests.filter(url => url.includes('/deck')).length
+  assert(statusCalls > 0, `轮询应当请求 /status（实际请求：${requests.join(', ')}）`)
+  assert(deckReloads > 0, '`changed=true` 时必须请求 /deck 重载')
+  const logged = exposedStore.get().log.map(entry => entry.text).join(' | ')
+  assert(logged.includes('已自动重载'), `日志里应说明自动重载（实际：${logged || '(空)'}）`)
+
+  fetchHandler = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, value: { rev: 0, canUndo: false, canRedo: false, entries: [] } }) })
+  exposedStore.set(current => ({ ...current, deck: null, log: [] }))
+})
+
+step('client: 发送后在 rev 推进时立刻释放 sending（回归：150 秒锁死）', async () => {
+  // 回归：waitForAi 里 `let running = false` 写死，break 不可达 → 每次发送锁满 150 秒，
+  // 期间打开/撤销/重做全灰。现在轮询 /status，rev 一前进就退出。
+  openPanelViaLauncher()
+  exposedStore.set(current => ({
+    ...current,
+    deck: makeDeck(0),
+    sessionId: 'sess-1',
+    selectedIds: ['s1:1'],
+    instruction: '把标题改红',
+    drafts: [],
+    sending: false,
+    log: [],
+  }))
+
+  fetchHandler = async (url) => {
+    if (url.includes('/status')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, value: { file: 'C:/tmp/deck.pptx', rev: 1, mtimeMs: 1000, openedMtimeMs: 1000, changed: false, renderToken: 'tok' } }) }
+    }
+    if (url.includes('/history')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, value: { rev: 1, canUndo: true, canRedo: false, entries: [] } }) }
+    }
+    if (url.includes('/deck')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, value: makeDeck(1) }) }
+    }
+    if (url.includes('/context')) {
+      return { ok: true, status: 200, json: async () => ({ ok: true, value: { requestId: 'req-1' } }) }
+    }
+    return { ok: true, status: 200, json: async () => ({ ok: true, value: {} }) }
+  }
+
+  app.__forTests.renderToTag(renderFloating())
+  const send = app.__forTests.actions?.send
+  assert(typeof send === 'function', '测试钩子应暴露 actions.send')
+  await send()
+  // 推进几轮：waitForAi 每 700ms 轮询一次 /status，rev=1 > baseRev=0 时立刻退出
+  await scheduler.flush(3)
+  assertEqual(exposedStore.get().sending, false, 'rev 推进后 sending 必须归位（不能锁 150 秒）')
+
+  fetchHandler = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, value: { rev: 0, canUndo: false, canRedo: false, entries: [] } }) })
+  exposedStore.set(current => ({ ...current, deck: null, sessionId: '', selectedIds: [], instruction: '', log: [] }))
 })
 
 console.log('')
