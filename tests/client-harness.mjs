@@ -51,26 +51,52 @@ function step(name, fn) {
 function createFakeDom() {
   const created = []
   const listeners = []
-  const makeElement = (tag) => ({
-    tagName: String(tag).toUpperCase(),
-    dataset: {},
-    style: {},
-    textContent: '',
-    children: [],
-    attributes: {},
-    appendChild(child) { this.children.push(child); return child },
-    remove() {},
-    setAttribute(name, value) { this.attributes[name] = value },
-    getAttribute(name) { return this.attributes[name] },
-    addEventListener(type, fn) { listeners.push({ type, fn }) },
-    removeEventListener() {},
-    querySelector() { return null },
-    querySelectorAll() { return [] },
-    getBoundingClientRect() { return { left: 0, top: 0, width: 800, height: 450 } },
-    setPointerCapture() {},
-    contains() { return false },
-    focus() {},
-  })
+  const makeElement = (tag) => {
+    /** 每个元素自己的监听器表（pickPptx 依赖 input 上的 change/cancel）。 */
+    const own = new Map()
+    const element = {
+      tagName: String(tag).toUpperCase(),
+      dataset: {},
+      style: {},
+      textContent: '',
+      children: [],
+      attributes: {},
+      /** <input type="file"> 用：测试里手动塞 File / 或保持 null 模拟取消。 */
+      files: null,
+      type: '',
+      accept: '',
+      appendChild(child) { this.children.push(child); return child },
+      remove() { this.removed = true },
+      setAttribute(name, value) { this.attributes[name] = value },
+      getAttribute(name) { return this.attributes[name] },
+      addEventListener(type, fn) {
+        listeners.push({ type, fn })
+        if (!own.has(type)) own.set(type, [])
+        own.get(type).push(fn)
+      },
+      removeEventListener(type, fn) {
+        const list = own.get(type)
+        if (list === undefined) return
+        const at = list.indexOf(fn)
+        if (at !== -1) list.splice(at, 1)
+      },
+      /** 测试辅助：向该元素派发一个事件（真实浏览器由用户交互触发）。 */
+      dispatch(type, event = {}) {
+        for (const fn of [...(own.get(type) ?? [])]) {
+          try { fn({ currentTarget: element, target: element, ...event }) } catch { /* 回调异常由被测代码处理 */ }
+        }
+      },
+      /** 真实浏览器里 click() 会弹系统对话框；测试里什么也不做，由 dispatch 模拟结果。 */
+      click() { this.clicked = true },
+      querySelector() { return null },
+      querySelectorAll() { return [] },
+      getBoundingClientRect() { return { left: 0, top: 0, width: 800, height: 450 } },
+      setPointerCapture() {},
+      contains() { return false },
+      focus() {},
+    }
+    return element
+  }
   const document = {
     head: makeElement('head'),
     body: makeElement('body'),
@@ -798,6 +824,117 @@ step('client: 发送后在 rev 推进时立刻释放 sending（回归：150 秒�
 
   fetchHandler = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, value: { rev: 0, canUndo: false, canRedo: false, entries: [] } }) })
   exposedStore.set(current => ({ ...current, deck: null, sessionId: '', selectedIds: [], instruction: '', log: [] }))
+})
+
+step('client: 文件对话框「取消」必须立刻收尾（回归：Promise 永不 settle）', async () => {
+  // 回归：pickPptx 里用了作用域外的 `win`，抛 ReferenceError 被空 catch 吞掉，
+  // 于是取消对话框后 Promise 永不 resolve —— 界面毫无反应，隐藏的 <input> 还留在 body。
+  openPanelViaLauncher()
+  const before = dom.created.length
+  let settled = false
+  const pending = app.__forTests.actions.pickAndOpen().then(() => { settled = true })
+
+  // 不要真的等它：先让 Promise 有机会推进，再派发 cancel
+  await Promise.resolve()
+  const input = dom.created.slice(before).find(element => element.tagName === 'INPUT')
+  assert(input !== undefined, '打开按钮应创建 <input type="file">')
+  assertEqual(input.clicked, true, '应触发一次 click（真实环境里这才弹系统对话框）')
+
+  input.dispatch('cancel')
+  await pending
+  assertEqual(settled, true, '取消后 pickAndOpen 必须收尾（不能永远挂着）')
+  assertEqual(input.removed, true, '取消后隐藏的 <input> 必须从 body 移除')
+  // 取消不该触发任何打开请求
+  assertEqual(fetchLog.filter(entry => entry.url.includes('/files') || entry.url.includes('/open')).length, 0,
+    '取消后不应发出打开请求')
+})
+
+step('client: 就地编辑器定位与字号都按 zoom 缩放（回归：编辑器错位）', () => {
+  // 回归背景：textarea **不继承** zoom 容器的缩放（Chromium 对表单控件不可靠），
+  // 所以编辑器渲染在未缩放的 .dsh-ppt-canvas 里，坐标/字号/内边距全靠
+  // textEditStyle(shape, zoom) 手动 ×zoom。少乘一处就是"点字后编辑框偏了"。
+  const shape = {
+    id: 's1:1',
+    kind: 'text',
+    geometry: { x: 100, y: 50, w: 300, h: 200, rotation: 0, flipH: false, flipV: false },
+    style: { fill: { type: 'none', color: null }, line: null },
+    text: {
+      plain: '第一行\n第二行',
+      fontSize: 20,
+      align: 'left',
+      anchor: 'top',
+      color: '#111111',
+      bold: false,
+      italic: false,
+      fontFamily: null,
+      insets: { left: 9.6, top: 4.8, right: 9.6, bottom: 4.8 },
+      paragraphs: [{ runs: [{ text: '第一行', fontSize: 20 }] }],
+    },
+  }
+
+  const zoom = 2
+  const style = app.__forTests.textEditStyle(shape, zoom)
+  assertEqual(style.left, '200px', `left 必须 ×zoom（got ${style.left}）`)
+  assertEqual(style.top, '100px', `top 必须 ×zoom（got ${style.top}）`)
+  assertEqual(style.width, '600px', `width 必须 ×zoom（got ${style.width}）`)
+  assertEqual(style.height, '400px', `height 必须 ×zoom（got ${style.height}）`)
+  assertEqual(style.fontSize, '40px', `fontSize 必须 ×zoom（got ${style.fontSize}）`)
+  // 内边距也要 ×zoom：top = 4.8 * 2 = 9.6；left = 9.6 * 2 = 19.2
+  assert(style.padding.startsWith('9.6px 19.2px'), `padding 必须 ×zoom（got ${style.padding}）`)
+
+  // zoom=1 时应当等于原始几何
+  const one = app.__forTests.textEditStyle(shape, 1)
+  assertEqual(one.left, '100px')
+  assertEqual(one.fontSize, '20px')
+
+  // 垂直锚点补偿：middle 时首行要下推，且同样 ×zoom
+  const middleShape = { ...shape, text: { ...shape.text, anchor: 'middle' } }
+  const middle = app.__forTests.textEditStyle(middleShape, 1)
+  const topPad = Number.parseFloat(middle.padding.split(' ')[0])
+  assert(topPad > 4.8, `middle 锚点应把首行下推（got padding-top ${topPad}）`)
+})
+
+step('client: 就地编辑失焦提交 setText，内容没变则不发请求', async () => {
+  // 两条都属于"静默出错"档：
+  //   1. 失焦没有真的发 apply → 用户以为改了，文件没变；
+  //   2. 内容没变也发 apply → 白写盘、rev+1、撤销栈多一条。
+  openPanelViaLauncher()
+  exposedStore.set(current => ({
+    ...current,
+    deck: makeDeck(0),
+    slideIndex: 0,
+    zoom: 1,
+    editingId: 's1:1',
+    editCaret: { x: 30, y: 20 },
+    log: [],
+  }))
+
+  const applies = []
+  fetchHandler = async (url, init) => {
+    if (url.includes('/apply')) applies.push(init?.body ?? '')
+    return { ok: true, status: 200, json: async () => ({ ok: true, value: { rev: 1, applied: true, changedIds: ['s1:1'] } }) }
+  }
+
+  const tree = renderFloating()
+  const textareas = []
+  collectElements(tree, element => element.type === 'textarea' && element.props?.className === 'dsh-ppt-textedit', textareas)
+  assertEqual(textareas.length, 1, `处于编辑态时应渲染一个编辑框（got ${textareas.length}）`)
+
+  // 1) 改成新内容 → 必须发一次 setText
+  textareas[0].props.onBlur({ target: { value: '改过的标题' } })
+  await scheduler.flush(1)
+  assert(applies.length >= 1, '失焦提交必须发出 apply 请求')
+  assert(applies[0].includes('改过的标题'), `请求体应含新文本（got ${applies[0].slice(0, 120)}）`)
+  assert(applies[0].includes('setText'), '请求体应是 setText op')
+
+  // 2) 再失焦一次、内容没变 → 不应再发请求
+  const countAfterFirst = applies.length
+  textareas[0].props.onBlur({ target: { value: '标题' } })  // 与原始文本相同
+  await scheduler.flush(1)
+  assertEqual(applies.length, countAfterFirst, '内容没变时不应再发 apply（避免白写盘）')
+
+  exposedStore.set(current => ({ ...current, deck: null, editingId: null, editCaret: null, log: [] }))
+  fetchHandler = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, value: { rev: 0, canUndo: false, canRedo: false, entries: [] } }) })
 })
 
 console.log('')

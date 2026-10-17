@@ -2874,6 +2874,11 @@ function createPptApp(options) {
       /** 媒体 URL 的候选列表（核对图片地址拼得对不对）。 */
       mediaUrlCandidates,
       /**
+       * 就地编辑器的定位/字号计算（**所有值都乘了 zoom**）。
+       * 这是"编辑器错位"一类回归的核心公式，单独暴露出来才能精确断言。
+       */
+      textEditStyle,
+      /**
        * 面板动作（send / newSession / openPath …）。
        * 测试用：发送后在 rev 推进时是否释放 sending，只能靠真实调用 send() 验证。
        */
