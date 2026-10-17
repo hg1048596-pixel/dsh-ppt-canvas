@@ -5,7 +5,7 @@
 
 import { existsSync, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { resolve, basename } from 'node:path'
 import { loadPackage, readDeck } from './pptx-read.js'
 import { applyPatch } from './pptx-write.js'
 import { createHistory, deckKeyOf } from './history.js'
@@ -99,17 +99,33 @@ export class DeckStore {
    * @returns {Promise<object>} 与 open() 相同的 Deck
    */
   async openBytes(bytes, name) {
-    const { mkdirSync, writeFileSync } = await import('node:fs')
+    const { mkdirSync, unlinkSync, writeFileSync } = await import('node:fs')
     const { tmpdir } = await import('node:os')
     const { join } = await import('node:path')
+    // **先校验大小再落盘**：以前是写完之后 open() 才因 80MB 上限拒绝，
+    // 被拒绝的上传文件会永久留在 picked/ 里（最多 96MB base64 解码量）。
+    const MAX_BYTES = 80 * 1024 * 1024
+    if (bytes === null || bytes === undefined || bytes.length === 0) {
+      throw new DeckError('badRequest', 'uploaded file is empty')
+    }
+    if (bytes.length > MAX_BYTES) {
+      throw new DeckError('badRequest', `presentation is too large (${bytes.length} bytes; limit ${MAX_BYTES})`)
+    }
     const dir = join(tmpdir(), 'dsh-ppt-canvas', 'picked')
     mkdirSync(dir, { recursive: true })
     const base = typeof name === 'string' && /\.pptx$/i.test(name) ? name : 'picked.pptx'
     const safe = base.replace(/[\\/:*?"<>|]/g, '_')
-    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
+    // 秒级时间戳同一秒会重名覆盖 —— 加随机后缀，注释里说的"唯一文件名"才成立。
+    const stamp = `${new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)}-${Math.random().toString(36).slice(2, 8)}`
     const filePath = join(dir, `${stamp}-${safe}`)
     writeFileSync(filePath, bytes)
-    return this.open(filePath, { force: true })
+    try {
+      return await this.open(filePath, { force: true })
+    } catch (error) {
+      // 打不开就别把垃圾留在临时目录里
+      try { unlinkSync(filePath) } catch { /* 忽略 */ }
+      throw error
+    }
   }
 
   /**
@@ -127,6 +143,11 @@ export class DeckStore {
     }
     const stat = statSync(filePath)
     if (!stat.isFile()) throw new DeckError('badRequest', `not a file: ${filePath}`)
+    // 只接受 .pptx：否则插件等于一个「读任意文件」的接口
+    // （虽然非 zip 会在解析时失败，但错误信息会泄露路径存在性与内容形态）。
+    if (!/\.pptx$/i.test(filePath)) {
+      throw new DeckError('badRequest', `only .pptx files can be opened (got ${basename(filePath)})`)
+    }
     if (stat.size > 80 * 1024 * 1024) {
       throw new DeckError('badRequest', `presentation is too large (${stat.size} bytes)`)
     }

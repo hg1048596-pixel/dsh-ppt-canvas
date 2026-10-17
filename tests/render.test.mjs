@@ -196,7 +196,7 @@ if (soffice === null) {
       assertEqual(again.cached, true, '第二次应当命中缓存')
     })
 
-    await checkAsync('render: 文件改动后缓存失效（重新渲染）', async () => {
+    await checkAsync('render: 页内容变化后缓存失效（重新渲染）', async () => {
       const file = join(workDir, 'pages.pptx')
       const pkg = loadPackage(new Uint8Array(readFileSync(file)))
       // 用独立宽度，避免命中其他用例留下的缓存（缓存键含宽度）。
@@ -204,14 +204,17 @@ if (soffice === null) {
       const before = await renderSlidePng({ file, entries: pkg.entries, page: 1, width })
       assertEqual(before.cached, false, '第一次渲染不应命中缓存')
 
-      // 改内容并确认 mtime 真的变了：缓存键含 mtime，必须重渲染。
-      // （不能用 writeFileSync 写回同样的字节 —— 有些文件系统上 mtime 不变。）
-      const bytes = readFileSync(file)
-      const stamp = Buffer.from(`<!-- ${Date.now()} -->`)
-      await new Promise(resolve => setTimeout(resolve, 1100))
-      writeFileSync(file, Buffer.concat([bytes, stamp]))
-      const after = await renderSlidePng({ file, entries: pkg.entries, page: 1, width })
-      assertEqual(after.cached, false, '文件改动后不应命中旧缓存')
+      // 缓存键用的是**该页内容**（不是磁盘 mtime）。
+      // 所以必须真的改这一页的内容：用一份内容不同的 deck 覆盖它。
+      copyFileSync(join(HERE, 'fixtures', 'demo.pptx'), file)
+      const changedPkg = loadPackage(new Uint8Array(readFileSync(file)))
+      const after = await renderSlidePng({ file, entries: changedPkg.entries, page: 1, width })
+      assertEqual(after.cached, false, '页内容变了就必须重渲染')
+      assert(Buffer.compare(before.buffer, after.buffer) !== 0, '内容不同的两页应产出不同的图')
+
+      // 内容没变时应当命中缓存（这正是「用内容做键」的意义）
+      const again = await renderSlidePng({ file, entries: changedPkg.entries, page: 1, width })
+      assertEqual(again.cached, true, '内容未变时应命中缓存')
     })
   } finally {
     rmSync(workDir, { recursive: true, force: true })

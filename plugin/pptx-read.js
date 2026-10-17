@@ -1079,10 +1079,9 @@ export function readDeck(buffer, filePath, rev = 0) {
         const shape = readShape(child, { slideId, slidePart, rels, theme, mediaIndex, warnings, masterText, layoutPlaceholders })
         if (shape === null) continue
         shape.z = z
-        shape.image = shape.image === null ? null : {
-          ...shape.image,
-          url: shape.image.url === null ? null : shape.image.url.replace('__DECK__', deckKey),
-        }
+        // 媒体 URL 里的 deckKey 占位符要**递归**替换：组合里的图片是子形状，
+        // 只在顶层替换会让组内图片的 URL 留下字面量 __DECK__（媒体路由必然 404）。
+        rewriteMediaUrls(shape, deckKey)
         shapes.push(shape)
         z++
       }
@@ -1109,15 +1108,42 @@ export function readDeck(buffer, filePath, rev = 0) {
 }
 
 /** 按 id 找元素（含组合子元素）。 */
+/**
+ * 把形状（含组合内的子形状）图片 URL 里的 `__DECK__` 换成本次 deck 的 key。
+ */
+function rewriteMediaUrls(shape, deckKey) {
+  if (shape === null || shape === undefined) return
+  if (shape.image !== null && shape.image !== undefined && typeof shape.image.url === 'string') {
+    shape.image = { ...shape.image, url: shape.image.url.replace('__DECK__', deckKey) }
+  }
+  if (Array.isArray(shape.children)) {
+    for (const child of shape.children) rewriteMediaUrls(child, deckKey)
+  }
+}
+
+/**
+ * 按 id 在整份 deck 里找元素，**递归**进入组合（组合可嵌套）。
+ *
+ * 以前只查顶层 + 一层子元素：两层组合里的形状虽然会出现在 deck 里，
+ * 但任何按 id 的操作（setFill/setGeometry…）都会报 "no element with id"。
+ *
+ * @returns {{shape: object, slide: object, parent?: object}|undefined}
+ */
 export function elementById(deck, id) {
-  for (const slide of deck.slides) {
-    for (const shape of slide.shapes) {
-      if (shape.id === id) return { shape, slide }
-      if (Array.isArray(shape.children)) {
-        for (const child of shape.children) {
-          if (child.id === id) return { shape: child, slide, parent: shape }
-        }
+  const walk = (shape, slide, parent) => {
+    if (shape.id === id) return { shape, slide, ...(parent === undefined ? {} : { parent }) }
+    if (Array.isArray(shape.children)) {
+      for (const child of shape.children) {
+        const hit = walk(child, slide, shape)
+        if (hit !== undefined) return hit
       }
+    }
+    return undefined
+  }
+  for (const slide of deck.slides ?? []) {
+    for (const shape of slide.shapes ?? []) {
+      const hit = walk(shape, slide, undefined)
+      if (hit !== undefined) return hit
     }
   }
   return undefined

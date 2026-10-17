@@ -12,6 +12,7 @@ import { DeckStore } from './deck-store.js'
 import { registerRoutes, handleRequest } from './api.js'
 import { registerTools } from './tools.js'
 import { startStandaloneApi } from './standalone-server.js'
+import { sweepTemp } from './temp-sweep.js'
 
 export const name = 'dsh-ppt-canvas'
 /**
@@ -32,6 +33,14 @@ export function apply(ctx) {
   const logger = ctx.get('logger') ?? console
   const tag = '[dsh-ppt-canvas]'
   logger.info?.(`${tag} apply() entered; probing host services…`)
+
+  // 启动时清一次临时区（上传副本 / 渲染缓存 / 历史快照都会无界增长）。
+  // 只删超过保留期的，且失败不影响插件启动。
+  try {
+    sweepTemp({ logger })
+  } catch (error) {
+    logger.warn?.(`${tag} temp sweep failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 
   /** 事件订阅者（诊断用；客户端靠轮询 + 工具返回同步）。 */
   const bus = {

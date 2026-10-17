@@ -59,20 +59,22 @@ function cacheDir() {
  * @param {string[]} [slideParts] `sldIdLst` 顺序的部件名；给了就按它把页号映射成部件
  * @returns {{order: string[], entries: Map<string, Buffer>}} 新包的部件表
  */
-export function promoteSlide(entries, page, slideParts) {
-  // 页号 ≠ 文件名！`readDeck` 的页序来自 presentation.xml 的 `sldIdLst`，
-  // 而部件文件名是 `slideN.xml`。用户重排过幻灯片后两者不再一致
-  // （例如 sldIdLst 第 1 项指向 slide2.xml），直接拼 `slide${page}.xml` 会渲染错页。
-  // 所以：能拿到 slideParts 就按它映射；page 直接传部件名也接受。
-  let part
-  if (typeof page === 'string' && page !== '') {
-    part = page
-  } else if (Array.isArray(slideParts) && slideParts.length > 0) {
+/**
+ * 页号 → 部件名。
+ * 页序来自 presentation.xml 的 `sldIdLst`，部件文件名是 `slideN.xml`，
+ * 两者在用户重排过幻灯片后不再一致。
+ */
+export function resolveSlidePart(page, slideParts) {
+  if (typeof page === 'string' && page !== '') return page
+  if (Array.isArray(slideParts) && slideParts.length > 0) {
     const index = Math.max(0, Math.trunc(Number(page)) - 1)
-    part = slideParts[Math.min(index, slideParts.length - 1)]
-  } else {
-    part = `ppt/slides/slide${page}.xml`
+    return slideParts[Math.min(index, slideParts.length - 1)]
   }
+  return `ppt/slides/slide${page}.xml`
+}
+
+export function promoteSlide(entries, page, slideParts) {
+  const part = resolveSlidePart(page, slideParts)
   if (typeof part !== 'string' || part === '') {
     const error = new Error(`cannot resolve slide part for page ${page}`)
     error.code = 'notFound'
@@ -143,9 +145,19 @@ export async function renderSlidePng({ file, entries, page, width = 1600, slideP
     throw error
   }
 
-  const stat = statSync(file)
+  // 缓存键必须用**该页内容**而不是磁盘 mtime：
+  // 渲染输入是内存里的 buffer，而 mtime 可能已经变了（PowerPoint 刚保存过但 store
+  // 还没 reload）。用 mtime 会把「旧 buffer 渲出的图」按「新 mtime」缓存，
+  // 之后 reload 时 mtime 没再变，反而一直命中这张错图。
+  const partName = resolveSlidePart(page, slideParts)
+  const partBytes = entries.get(partName)
+  const contentHash = createHash('sha1')
+    .update(partBytes === undefined ? Buffer.alloc(0) : Buffer.from(partBytes))
+    .update(String(width))
+    .digest('hex')
+    .slice(0, 12)
   const key = createHash('sha1')
-    .update(`${file}|${stat.size}|${stat.mtimeMs}|${page}|${width}`)
+    .update(`${file}|${partName}|${contentHash}|${page}|${width}`)
     .digest('hex')
     .slice(0, 16)
   const dir = cacheDir()
